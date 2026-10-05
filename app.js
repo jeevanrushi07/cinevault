@@ -793,6 +793,69 @@ function recent() {
 
 window.stageById = id => stage(movies.find(m => String(m.tmdbId) === String(id)));
 
+function creditImage(path) {
+  if (!path) return "";
+  return /^https?:\/\//i.test(path) ? path : `https://image.tmdb.org/t/p/w185${path}`;
+}
+
+function creditInitials(name) {
+  return String(name||"?").split(/\s+/).slice(0,2).map(part=>part[0]||"").join("").toUpperCase();
+}
+
+function renderCredits(movie) {
+  const director=movie.directorDetails||{name:movie.director||"",profilePath:""};
+  const cast=Array.isArray(movie.castDetails)&&movie.castDetails.length
+    ? movie.castDetails
+    : (movie.cast||[]).map(person=>typeof person==="string"?{name:person}:person);
+  return `
+    <div class="creditSection">
+      <span class="creditSectionLabel">${esc(movie.directorLabel||"DIRECTOR")}</span>
+      ${director.name
+        ? `<div class="directorCredit">
+            ${director.profilePath
+              ? `<img src="${esc(creditImage(director.profilePath))}" alt="${esc(director.name)}">`
+              : `<span class="creditInitials">${esc(creditInitials(director.name))}</span>`}
+            <b>${esc(director.name)}</b>
+          </div>`
+        : '<p class="creditEmpty">Director details unavailable.</p>'}
+    </div>
+    <div class="creditSection">
+      <span class="creditSectionLabel">CAST</span>
+      ${cast.length
+        ? `<div class="castCredits">${cast.map(person=>`
+            <article class="castCredit">
+              ${person.profilePath
+                ? `<img src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
+                : `<span class="creditInitials">${esc(creditInitials(person.name))}</span>`}
+              <b>${esc(person.name||"Cast member")}</b>
+              ${person.character?`<small>${esc(person.character)}</small>`:""}
+            </article>`).join("")}</div>`
+        : '<p class="creditEmpty">Cast details unavailable.</p>'}
+    </div>`;
+}
+
+async function refreshStageCredits(movie) {
+  const panel=$("#stageCredits");
+  if (!panel) return;
+  if (!tmdbReady()) {
+    panel.insertAdjacentHTML("beforeend",'<p class="creditLoadMessage">Add a TMDB API key in Settings to load cast and crew portraits.</p>');
+    return;
+  }
+  try {
+    const type=movie.type==="series"?"series":"movie";
+    const response=await fetch(`/api/movie/${encodeURIComponent(movie.tmdbId)}?type=${type}`,{headers:tmdbHeaders()});
+    const details=await response.json();
+    if (!response.ok) throw new Error(details.error||"TMDB could not load cast and crew.");
+    const currentPanel=$("#stageCredits");
+    if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
+    currentPanel.innerHTML=renderCredits(details);
+  } catch(error) {
+    const currentPanel=$("#stageCredits");
+    if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
+    currentPanel.insertAdjacentHTML("beforeend",`<p class="creditLoadMessage">${esc(error.message)}</p>`);
+  }
+}
+
 function characterWall() {
   return `
     <div class="head">
@@ -1382,7 +1445,8 @@ async function searchHeaderTitles(query) {
 
 async function choose(r,status="watched") {
   try {
-    const rr=await fetch("/api/movie/"+r.id,{headers:tmdbHeaders()});
+    const type=r.media_type==="tv"?"series":"movie";
+    const rr=await fetch(`/api/movie/${encodeURIComponent(r.id)}?type=${type}`,{headers:tmdbHeaders()});
     let x=rr.ok ? await rr.json() : null;
 
     if (!x) {
@@ -1426,7 +1490,7 @@ function stage(m,readOnly=false) {
     : `https://www.youtube.com/results?search_query=${encodeURIComponent(m.title+" trailer")}`;
 
   document.body.insertAdjacentHTML("beforeend",`
-    <div class="stage" id="stage">
+    <div class="stage" id="stage" data-movie-id="${esc(m.tmdbId)}">
       <button class="x" onclick="$('#stage').remove()">×</button>
       <div class="stagebg" onclick="event.stopPropagation()" style="background-image:linear-gradient(90deg,#08080c 20%,rgba(8,8,12,.8),rgba(8,8,12,.15)),url('${backdrop(m.backdropPath)}')">
         <div class="stagebody">
@@ -1446,10 +1510,7 @@ function stage(m,readOnly=false) {
 
             <p>${esc(m.overview||"No synopsis available.")}</p>
 
-            <div class="meta">
-              <span><b>DIRECTOR</b>${esc(m.director||"—")}</span>
-              <span><b>CAST</b>${esc((m.cast||[]).slice(0,7).join(", ")||"—")}</span>
-            </div>
+            <div class="creditsPanel" id="stageCredits">${renderCredits(m)}</div>
 
             ${readOnly ? "" : `
               <label>
@@ -1475,6 +1536,7 @@ function stage(m,readOnly=false) {
   $("#stage").onclick=e=>{
     if (e.target===e.currentTarget) $("#stage").remove();
   };
+  refreshStageCredits(m);
 
   if (!readOnly) $("#note").onblur=async e=>{
     try {
