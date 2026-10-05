@@ -73,6 +73,7 @@ export default async function handler(req,res) {
 
     const results=[];
     const seen=new Set();
+    const people=[];
     appendResults(results,seen,
       (primaryResult.results||[]).filter(item=>["movie","tv"].includes(item.media_type)),
       "multi","title");
@@ -86,10 +87,23 @@ export default async function handler(req,res) {
         return {};
       });
       const [peopleBody,keywordBody,genreBody]=auxiliary;
-      const people=(peopleBody.results||[])
+      const matchedPeople=(peopleBody.results||[])
         .filter(person=>person.id&&person.name)
-        .slice(0,2);
-      const personCredits=await Promise.allSettled(people.map(async person=>{
+        .slice(0,8);
+      people.push(...matchedPeople.map(person=>({
+        id:person.id,
+        name:person.name,
+        profile_path:person.profile_path||"",
+        known_for_department:person.known_for_department||"",
+        known_for:(person.known_for||[]).slice(0,3).map(item=>({
+          id:item.id,
+          title:item.title||item.name||"",
+          media_type:item.media_type==="tv"?"tv":"movie",
+          poster_path:item.poster_path||"",
+          release_date:item.release_date||item.first_air_date||""
+        }))
+      })));
+      const personCredits=await Promise.allSettled(matchedPeople.slice(0,2).map(async person=>{
         const [movieCredits,tvCredits]=await Promise.all([
           tmdbJson(`/person/${person.id}/movie_credits?${language}`,key),
           tmdbJson(`/person/${person.id}/tv_credits?${language}`,key)
@@ -164,7 +178,8 @@ export default async function handler(req,res) {
       page,
       total_pages:Math.max(1,Math.min(500,totalPages)),
       total_results:totalResults,
-      results
+      results,
+      people
     });
   } catch(error) {
     console.error("TMDB title, person, or year search failed:",error);
