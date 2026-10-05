@@ -1014,11 +1014,30 @@ function renderCredits(movie) {
     </div>`;
 }
 
+function renderCreditsPlaceholder() {
+  const cards=(count,kind)=>`<div class="${kind}Credits creditSkeletonRow" aria-hidden="true">${Array.from({length:count},()=>`
+    <div class="${kind}Credit creditSkeletonCard">
+      <span class="creditSkeletonPortrait"></span>
+      <span class="creditSkeletonLine"></span>
+      <span class="creditSkeletonLine short"></span>
+    </div>`).join("")}</div>`;
+  return `
+    <div class="movieFacts creditSkeletonFacts" aria-hidden="true">
+      <span class="creditSkeletonPill"></span><span class="creditSkeletonPill short"></span>
+    </div>
+    <div class="creditSection creditSkeletonSection" aria-hidden="true">
+      <span class="creditSectionLabel">PRODUCTION</span>${cards(4,"production")}
+    </div>
+    <div class="creditSection creditSkeletonSection" aria-hidden="true">
+      <span class="creditSectionLabel">CAST</span>${cards(6,"cast")}
+    </div>`;
+}
+
 async function refreshStageCredits(movie) {
   const panel=$("#stageCredits");
   if (!panel) return;
   if (!tmdbReady()) {
-    panel.insertAdjacentHTML("beforeend",'<p class="creditLoadMessage">Add a TMDB API key in Settings to load cast and crew portraits.</p>');
+    panel.innerHTML='<p class="creditLoadMessage">Add a TMDB API key in Settings to load cast and crew portraits.</p>';
     return;
   }
   try {
@@ -1033,7 +1052,7 @@ async function refreshStageCredits(movie) {
   } catch(error) {
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
-    currentPanel.insertAdjacentHTML("beforeend",`<p class="creditLoadMessage">${esc(error.message)}</p>`);
+    currentPanel.innerHTML=`<p class="creditLoadMessage">${esc(error.message)}</p>`;
   }
 }
 
@@ -1838,7 +1857,9 @@ function stage(m,readOnly=false,options={}) {
 
             <p>${esc(m.overview||"No synopsis available.")}</p>
 
-            <div class="creditsPanel" id="stageCredits">${renderCredits(m)}</div>
+            <div class="creditsPanel creditsLoading" id="stageCredits" aria-label="Loading ratings, production details, and cast">
+              ${renderCreditsPlaceholder()}
+            </div>
 
             ${readOnly ? "" : `
               <label>
