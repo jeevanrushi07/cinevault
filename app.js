@@ -31,8 +31,7 @@ let activeChatUser = null;
 let chatRefreshTimer = null;
 let notificationRefreshTimer = null;
 let activeStageMovie = null;
-let stageBackdropTimer = null;
-let stageBackdropIndex = 0;
+const stageBackdropVisits = new Map();
 let stageTrailerPlayer = null;
 let stageTrailerIdleTimer = null;
 let stageTrailerPointerHandler = null;
@@ -298,8 +297,6 @@ function shell() {
       e.preventDefault();
       $("#profileImageViewer")?.remove();
       stopStageTrailer();
-      clearInterval(stageBackdropTimer);
-      stageBackdropTimer=null;
       $("#stage")?.remove();
       document.querySelectorAll(".modal").forEach(modal=>modal.remove());
       $("#notificationPanel")?.classList.remove("open");
@@ -352,8 +349,6 @@ function shell() {
 
 async function restoreAppRoute(route) {
   stopStageTrailer();
-  clearInterval(stageBackdropTimer);
-  stageBackdropTimer=null;
   clearInterval(stageBackdropTimer);
   stageBackdropTimer=null;
   $("#stage")?.remove();
@@ -422,8 +417,6 @@ function initialAppRoute() {
 
 function closeAppDetail() {
   stopStageTrailer();
-  clearInterval(stageBackdropTimer);
-  stageBackdropTimer=null;
   const current=history.state;
   if (current?.detail?.type==="movie") {
     const returnDetail=current.detail.returnDetail||null;
@@ -450,8 +443,6 @@ function closeAppDetail() {
 
 function openPerson(id) {
   stopStageTrailer();
-  clearInterval(stageBackdropTimer);
-  stageBackdropTimer=null;
   $("#stage")?.remove();
   const current=history.state&&typeof history.state==="object"?history.state:{};
   const state={
@@ -1137,7 +1128,7 @@ async function refreshStageCredits(movie) {
           detail:{...route.detail,movie:updatedMovie,sequence}
         },"",location.href);
       }
-      rotateStageBackdrops(details.backdropPaths||[]);
+      setStageBackdrops(details.backdropPaths||[]);
       if (updatedMovie.trailerKey) setupStageTrailer(updatedMovie.trailerKey);
     }
   } catch(error) {
@@ -1913,9 +1904,22 @@ async function choose(r,status="watched") {
 function stage(m,readOnly=false,options={}) {
   if (!m) return;
 
+  const existingStage=$("#stage");
+  const newStageVisit=!existingStage||existingStage.dataset.movieId!==String(m.tmdbId);
+  const previousBackdrop=existingStage?.dataset.backdropPath||"";
+  let visitIndex=0;
+  if (newStageVisit) {
+    visitIndex=stageBackdropVisits.get(String(m.tmdbId))||0;
+    stageBackdropVisits.set(String(m.tmdbId),visitIndex+1);
+  } else {
+    visitIndex=Math.max(0,(stageBackdropVisits.get(String(m.tmdbId))||1)-1);
+  }
+  const existingPaths=(m.backdropPaths||[]).filter(path=>typeof path==="string"&&path.startsWith("/"));
+  const selectedBackdrop=previousBackdrop||
+    existingPaths[visitIndex%Math.max(1,existingPaths.length)]||
+    m.backdropPath||m.posterPath||"";
+
   stopStageTrailer();
-  clearInterval(stageBackdropTimer);
-  stageBackdropTimer=null;
   $("#stage")?.remove();
   activeStageMovie=m;
   if (Array.isArray(options.sequence)&&options.sequence.length) {
@@ -1967,8 +1971,8 @@ function stage(m,readOnly=false,options={}) {
         <button type="button" class="movieNavArrow movieNavPrevious ${movieIndex===0?"atSequenceEdge":""}" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" aria-disabled="${movieIndex===0}">‹</button>
         <button type="button" class="movieNavArrow movieNavNext ${movieIndex===activeStageSequence.length-1?"atSequenceEdge":""}" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" aria-disabled="${movieIndex===activeStageSequence.length-1}">›</button>`:""}
       <button type="button" class="x stageClose" onclick="closeAppDetail()" aria-label="Close movie details">×</button>
-      <div class="stagebg" data-read-only="${readOnly}">
-        <div class="stageBackdropLayer active" id="stageBackdropA" aria-hidden="true"></div>
+      <div class="stagebg" data-read-only="${readOnly}" data-backdrop-path="${esc(selectedBackdrop)}">
+        <div class="stageBackdropLayer active" id="stageBackdropA" aria-hidden="true" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(selectedBackdrop)}')"></div>
         <div class="stageBackdropLayer" id="stageBackdropB" aria-hidden="true"></div>
         <div class="stageTrailerLayer" id="stageTrailerLayer" aria-hidden="true"><div id="stageTrailerPlayer"></div></div>
         <div class="stageListControls" role="group" aria-label="Your movie lists">
@@ -2031,7 +2035,6 @@ function stage(m,readOnly=false,options={}) {
       closeAppDetail();
     }
   };
-  rotateStageBackdrops(m.backdropPaths?.length?m.backdropPaths:[m.backdropPath||m.posterPath].filter(Boolean));
   if (m.trailerKey) setupStageTrailer(m.trailerKey);
   refreshStageCredits(m);
   $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
@@ -2080,35 +2083,21 @@ function showCopyFeedback(button) {
   },2000));
 }
 
-function rotateStageBackdrops(paths) {
+function setStageBackdrops(paths) {
   const images=[...new Set((paths||[]).filter(path=>typeof path==="string"&&path.startsWith("/")))];
   if (!images.length||!$("#stage")) return;
-  clearInterval(stageBackdropTimer);
-  stageBackdropTimer=null;
-  stageBackdropIndex=0;
+  const movieId=String(activeStageMovie?.tmdbId||"");
+  const visitIndex=Math.max(0,(stageBackdropVisits.get(movieId)||1)-1);
+  const selected=images[visitIndex%images.length];
   const layers=[$("#stageBackdropA"),$("#stageBackdropB")];
   if (!layers[0]||!layers[1]) return;
-  const setImage=(layer,path)=>{
-    layer.style.backgroundImage=`linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url("${backdrop(path)}")`;
-  };
-  setImage(layers[0],images[0]);
+  const backgroundImage=`linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url("${backdrop(selected)}")`;
+  if ($("#stage").dataset.backdropPath===selected) return;
+  $("#stage").dataset.backdropPath=selected;
+  layers[0].style.backgroundImage=backgroundImage;
+  layers[1].style.backgroundImage="";
   layers[0].classList.add("active");
   layers[1].classList.remove("active");
-  if (images.length<2) return;
-
-  stageBackdropTimer=setInterval(()=>{
-    if (!$("#stage")) {
-      clearInterval(stageBackdropTimer);
-      stageBackdropTimer=null;
-      return;
-    }
-    const current=stageBackdropIndex%2;
-    const next=1-current;
-    stageBackdropIndex=(stageBackdropIndex+1)%images.length;
-    setImage(layers[next],images[stageBackdropIndex]);
-    layers[next].classList.add("active");
-    layers[current].classList.remove("active");
-  },6500);
 }
 
 function loadYouTubePlayerApi() {
