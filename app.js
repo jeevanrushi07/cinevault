@@ -614,6 +614,7 @@ async function show(tab, q = "", options = {}) {
   const want = filtered.filter(m=>m.status==="want");
   const allWatched=movies.filter(m=>m.status==="watched");
   const allWant=movies.filter(m=>m.status==="want");
+  const allLibraryMovies=movies.filter(m=>["watched","want"].includes(m.status));
   const genreCounts=new Map();
   allWatched.forEach(movie=>{
     (movie.genres||[]).forEach(genre=>{
@@ -630,16 +631,24 @@ async function show(tab, q = "", options = {}) {
   const archiveName=profile?.username||currentUser?.email?.split("@")[0]||"cinephile";
   const decadeCounts=new Map();
   const currentYear=new Date().getFullYear();
-  allWatched.forEach(movie=>{
+  allLibraryMovies.forEach(movie=>{
     const year=Number(movie.year);
     if (!Number.isInteger(year)||year<1888||year>currentYear+1) return;
     const decade=`${Math.floor(year/10)*10}s`;
     decadeCounts.set(decade,(decadeCounts.get(decade)||0)+1);
   });
   const decades=[...decadeCounts.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}));
-  const collection=archiveDecadeFilter
-    ? watched.filter(movie=>Number.isInteger(Number(movie.year))&&`${Math.floor(Number(movie.year)/10)*10}s`===archiveDecadeFilter)
-    : watched;
+  const collectionByStatus={
+    watched:watched.filter(movie=>!archiveDecadeFilter||
+      (Number.isInteger(Number(movie.year))&&`${Math.floor(Number(movie.year)/10)*10}s`===archiveDecadeFilter)),
+    want:want.filter(movie=>!archiveDecadeFilter||
+      (Number.isInteger(Number(movie.year))&&`${Math.floor(Number(movie.year)/10)*10}s`===archiveDecadeFilter))
+  };
+  const collection=[];
+  for (let index=0;index<Math.max(collectionByStatus.watched.length,collectionByStatus.want.length);index++) {
+    if (collectionByStatus.watched[index]) collection.push(collectionByStatus.watched[index]);
+    if (collectionByStatus.want[index]) collection.push(collectionByStatus.want[index]);
+  }
 
   c.innerHTML = `
     <section class="archiveHero">
@@ -681,10 +690,10 @@ async function show(tab, q = "", options = {}) {
         <p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>
       </div>
     </section>
-    <section class="archiveDecades" aria-label="Filter watched titles by decade">
-      <div><span>YOUR COLLECTION, BY ERA</span><p>Every decade has a different feeling.</p></div>
+    <section class="archiveDecades" aria-label="Filter library titles by decade">
+      <div><span>YOUR LIBRARY, BY ERA</span><p>Every decade has a different feeling.</p></div>
       <div class="archiveDecadeList">
-        <button type="button" class="archiveDecade ${archiveDecadeFilter?"":"active"}" data-decade="" aria-pressed="${archiveDecadeFilter?"false":"true"}"><b>ALL</b><i>${allWatched.length}</i></button>
+        <button type="button" class="archiveDecade ${archiveDecadeFilter?"":"active"}" data-decade="" aria-pressed="${archiveDecadeFilter?"false":"true"}"><b>ALL</b><i>${allLibraryMovies.length}</i></button>
         ${decades.map(([decade,count])=>`
           <button type="button" class="archiveDecade ${archiveDecadeFilter===decade?"active":""}" data-decade="${decade}" aria-pressed="${archiveDecadeFilter===decade}">
             <b>${decade}</b><i>${count}</i><span style="--decade-fill:${Math.max(12,Math.round(count/Math.max(...decades.map(([,value])=>value))*100))}%"></span>
@@ -693,14 +702,14 @@ async function show(tab, q = "", options = {}) {
     </section>
     <div class="head archiveCollectionHead">
       <div>
-        <span>${q?"SEARCHING YOUR ARCHIVE":archiveDecadeFilter?`A CHAPTER FROM THE ${archiveDecadeFilter.toUpperCase()}`:"THE STORIES THAT STAYED"}</span>
-        <h2>${q ? `Watched results for "${esc(q)}"` : archiveDecadeFilter?`The ${archiveDecadeFilter}`:"Your collection"}</h2>
+        <span>${q?"SEARCHING YOUR ARCHIVE":archiveDecadeFilter?`A CHAPTER FROM THE ${archiveDecadeFilter.toUpperCase()}`:"WATCHED & UP NEXT"}</span>
+        <h2>${q ? `Results for "${esc(q)}"` : archiveDecadeFilter?`The ${archiveDecadeFilter}`:"Your library"}</h2>
       </div>
-      <small>${collection.length} ${collection.length===1?"TITLE":"TITLES"}</small>
+      <small>${collection.length} ${collection.length===1?"TITLE":"TITLES"} · ${collectionByStatus.watched.length} WATCHED · ${collectionByStatus.want.length} UP NEXT</small>
     </div>
     ${collection.length?`
       <div class="wall archiveWall">
-        ${collection.map((m,i)=>poster(m,i,true)).join("")}
+        ${collection.map((m,i)=>poster(m,i,false,false,"",m.status)).join("")}
       </div>`:`
       <div class="archiveEmptyState">
         <span>${q?"NO MATCHES IN THIS CHAPTER":archiveDecadeFilter?"NO TITLES FROM THIS ERA YET":"YOUR ARCHIVE BEGINS HERE"}</span>
@@ -806,12 +815,12 @@ async function loadArchiveRecommendations(libraryMovies) {
   const typeLabels={movie:"FILM",series:"SERIES"};
   rail.innerHTML=recommendations.map(recommendation=>`
     <article class="archiveRecommendationCard" data-recommendation-item>
-      <div class="archiveRecommendationPoster">
+      <button type="button" class="archiveRecommendationPoster archiveRecommendationExpandTrigger" aria-expanded="false" aria-label="Show similar titles to ${esc(recommendation.title||"this recommendation")}">
         <img src="${esc(img(recommendation.posterPath))}" alt="" loading="lazy">
         <span>${typeLabels[recommendation.type]||"FILM"}${recommendation.year?` · ${esc(recommendation.year)}`:""}</span>
-      </div>
+      </button>
       <div class="archiveRecommendationInfo">
-        <strong>${esc(recommendation.title||"Untitled")}</strong>
+        <button type="button" class="archiveRecommendationTitle archiveRecommendationExpandTrigger" aria-expanded="false">${esc(recommendation.title||"Untitled")}</button>
         ${recommendation.tmdbRating?`<small>TMDB ${Number(recommendation.tmdbRating).toFixed(1)}</small>`:""}
         <button type="button" class="archiveRecommendationExpand" aria-expanded="false">MORE LIKE THIS <span>＋</span></button>
         <div class="archiveRecommendationActions">
@@ -829,7 +838,7 @@ async function loadArchiveRecommendations(libraryMovies) {
   rail.querySelectorAll(".archiveRecommendationAdd").forEach(button=>{
     button.addEventListener("click",()=>addRecommendedTitle(button,button.dataset.status));
   });
-  rail.querySelectorAll(".archiveRecommendationExpand").forEach(button=>{
+  rail.querySelectorAll(".archiveRecommendationExpand,.archiveRecommendationExpandTrigger").forEach(button=>{
     button.addEventListener("click",()=>toggleSimilarRecommendations(button));
   });
 }
@@ -838,10 +847,14 @@ async function toggleSimilarRecommendations(button) {
   const card=button.closest(".archiveRecommendationCard");
   const expansion=card?.querySelector(".archiveRecommendationExpansion");
   const rail=expansion?.querySelector(".archiveSimilarRail");
-  if (!card||!expansion||!rail) return;
-  const open=button.getAttribute("aria-expanded")==="true";
-  button.setAttribute("aria-expanded",String(!open));
-  button.innerHTML=open?"MORE LIKE THIS <span>＋</span>":"SIMILAR PICKS <span>−</span>";
+  const control=card?.querySelector(".archiveRecommendationExpand");
+  if (!card||!expansion||!rail||!control) return;
+  const open=control.getAttribute("aria-expanded")==="true";
+  control.setAttribute("aria-expanded",String(!open));
+  card.querySelectorAll(".archiveRecommendationExpandTrigger").forEach(trigger=>
+    trigger.setAttribute("aria-expanded",String(!open))
+  );
+  control.innerHTML=open?"MORE LIKE THIS <span>＋</span>":"SIMILAR PICKS <span>−</span>";
   card.classList.toggle("expanded",!open);
   expansion.hidden=open;
   if (open||rail.dataset.loaded==="true"||rail.dataset.loading==="true") return;
@@ -1230,7 +1243,7 @@ window.shareLibraryFromChat=async userId=>{
   }
 };
 
-function poster(m,i=0,mutual=false,readOnly=false,existingStatus="") {
+function poster(m,i=0,mutual=false,readOnly=false,existingStatus="",archiveStatus="") {
   return `
     <article class="poster p${i%7} ${mutual?"mutual":""} ${readOnly&&existingStatus?"sharedDuplicate":""} ${readOnly&&existingStatus==="watched"?"sharedWatched":""}" draggable="${!existingStatus}" data-shared="${readOnly}" data-id="${m.tmdbId}">
       <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
@@ -1241,6 +1254,10 @@ function poster(m,i=0,mutual=false,readOnly=false,existingStatus="") {
       </div>
       ${readOnly&&existingStatus
         ? `<em>${existingStatus==="watched"?"ALREADY WATCHED":"IN YOUR WATCHLIST"}</em>`
+        : archiveStatus==="watched"
+          ? '<em class="archivePosterStatus archivePosterWatched">IN COLLECTION</em>'
+          : archiveStatus==="want"
+            ? '<em class="archivePosterStatus archivePosterWant">UP NEXT</em>'
         : mutual ? "<em>WATCHED</em>" : ""}
     </article>`;
 }
