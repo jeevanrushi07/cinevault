@@ -289,15 +289,11 @@ function shell() {
     if (e.key==="Escape") {
       e.preventDefault();
       $("#profileImageViewer")?.remove();
-      if (history.state?.detail) {
-        history.back();
-        return;
-      }
       $("#stage")?.remove();
       document.querySelectorAll(".modal").forEach(modal=>modal.remove());
       $("#notificationPanel")?.classList.remove("open");
       $("#searchResults")?.classList.remove("open");
-      $("#search").value="";
+      if ($("#search")) $("#search").value="";
       searchQuery="";
       show("archive");
       return;
