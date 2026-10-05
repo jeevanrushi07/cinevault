@@ -39,6 +39,8 @@ let stageTrailerScrollHandler = null;
 let stageTrailerGeneration = 0;
 let stageTrailerIsIdle = false;
 let stageTrailerVideoId = "";
+let stageTrailerCandidates = [];
+let stageTrailerCandidateIndex = 0;
 let youtubePlayerApiPromise = null;
 let archiveSearchScrollHandler = null;
 let archiveSearchCompressed = false;
@@ -1147,7 +1149,8 @@ async function refreshStageCredits(movie) {
     const updatedMovie={
       ...movie,
       backdropPaths:details.backdropPaths||[],
-      trailerKey:details.trailerKey||movie.trailerKey||""
+      trailerKey:details.trailerKey||movie.trailerKey||"",
+      trailerKeys:details.trailerKeys||movie.trailerKeys||[]
     };
     if (activeStageMovie&&String(activeStageMovie.tmdbId)===String(movie.tmdbId)) {
       activeStageMovie=updatedMovie;
@@ -1164,7 +1167,9 @@ async function refreshStageCredits(movie) {
         },"",location.href);
       }
       setStageBackdrops(details.backdropPaths||[]);
-      if (updatedMovie.trailerKey) setupStageTrailer(updatedMovie.trailerKey);
+      if (updatedMovie.trailerKeys.length||updatedMovie.trailerKey) {
+        setupStageTrailer(updatedMovie.trailerKeys.length?updatedMovie.trailerKeys:updatedMovie.trailerKey);
+      }
     }
   } catch(error) {
     const currentPanel=$("#stageCredits");
@@ -2075,7 +2080,9 @@ function stage(m,readOnly=false,options={}) {
       closeAppDetail();
     }
   };
-  if (m.trailerKey) setupStageTrailer(m.trailerKey);
+  if (m.trailerKeys?.length||m.trailerKey) {
+    setupStageTrailer(m.trailerKeys?.length?m.trailerKeys:m.trailerKey);
+  }
   refreshStageCredits(m);
   $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
 
@@ -2176,6 +2183,8 @@ function stopStageTrailer() {
   }
   stageTrailerIsIdle=false;
   stageTrailerVideoId="";
+  stageTrailerCandidates=[];
+  stageTrailerCandidateIndex=0;
   if (stageTrailerPlayer) {
     stageTrailerPlayer.destroy();
     stageTrailerPlayer=null;
@@ -2186,11 +2195,14 @@ function stopStageTrailer() {
 function setupStageTrailer(videoId) {
   const holder=$("#stageTrailerPlayer");
   const stageElement=$("#stage");
-  if (!holder||!stageElement||!videoId||trailerReadMode) return;
+  const candidates=[...new Set((Array.isArray(videoId)?videoId:[videoId]).filter(key=>typeof key==="string"&&key.trim()))];
+  if (!holder||!stageElement||!candidates.length||trailerReadMode) return;
   stopStageTrailer();
   const generation=stageTrailerGeneration;
   stageTrailerIsIdle=false;
-  stageTrailerVideoId=videoId;
+  stageTrailerCandidates=candidates;
+  stageTrailerCandidateIndex=0;
+  stageTrailerVideoId=stageTrailerCandidates[0];
   stageTrailerPointerHandler=()=>{
     stageTrailerActivity();
   };
@@ -2214,7 +2226,7 @@ async function startStageTrailerAfterIdle(generation) {
     if (!stageTrailerPlayer) {
       stageTrailerPlayer=new YT.Player("stageTrailerPlayer",{
         videoId:stageTrailerVideoId,
-        playerVars:{autoplay:0,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,playsinline:1,rel:0},
+        playerVars:{autoplay:0,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,playsinline:1,rel:0,origin:location.origin},
         events:{
           onReady:event=>{
             event.target.mute();
@@ -2230,7 +2242,8 @@ async function startStageTrailerAfterIdle(generation) {
               event.target.mute();
               event.target.playVideo();
             }
-          }
+          },
+          onError:event=>tryNextStageTrailer(event.data,generation)
         }
       });
     } else {
@@ -2240,6 +2253,25 @@ async function startStageTrailerAfterIdle(generation) {
   } catch(error) {
     $("#stage")?.classList.remove("trailerVisible");
     console.error("Could not start the muted background trailer.",error);
+  }
+}
+
+function tryNextStageTrailer(errorCode,generation=stageTrailerGeneration) {
+  if (generation!==stageTrailerGeneration) return;
+  const nextIndex=stageTrailerCandidateIndex+1;
+  if (nextIndex>=stageTrailerCandidates.length) {
+    $("#stage")?.classList.remove("trailerVisible");
+    console.error(`All ${stageTrailerCandidates.length} embedded trailer candidates failed. Last YouTube player error: ${errorCode}.`);
+    return;
+  }
+  stageTrailerCandidateIndex=nextIndex;
+  stageTrailerVideoId=stageTrailerCandidates[nextIndex];
+  console.warn(`YouTube trailer ${stageTrailerCandidateIndex} failed with error ${errorCode}; trying another available trailer.`);
+  stageTrailerPlayer?.mute();
+  if (stageTrailerIsIdle) {
+    stageTrailerPlayer?.loadVideoById({videoId:stageTrailerVideoId,suggestedQuality:"hd720"});
+  } else {
+    stageTrailerPlayer?.cueVideoById({videoId:stageTrailerVideoId,suggestedQuality:"hd720"});
   }
 }
 
@@ -2268,7 +2300,7 @@ window.setTrailerReadMode=enabled=>{
   if (trailerReadMode) {
     stopStageTrailer();
   } else if (activeStageMovie?.trailerKey) {
-    setupStageTrailer(activeStageMovie.trailerKey);
+    setupStageTrailer(activeStageMovie.trailerKeys?.length?activeStageMovie.trailerKeys:activeStageMovie.trailerKey);
   }
 };
 

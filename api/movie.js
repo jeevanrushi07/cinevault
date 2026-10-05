@@ -93,9 +93,18 @@ export default async function handler(req,res) {
   const production=[...productionPeople.values()]
     .sort((a,b)=>productionPriority(a)-productionPriority(b)||a.name.localeCompare(b.name));
   const directorDetails=production.find(person=>person.jobs.includes("Director"))||null;
-  const trailer=(data.videos?.results||[]).find(video=>
-    video.site==="YouTube"&&["Trailer","Teaser"].includes(video.type)
-  );
+  const trailerVideos=(data.videos?.results||[])
+    .filter(video=>video.site==="YouTube"&&["Trailer","Teaser"].includes(video.type)&&video.key)
+    .sort((a,b)=>{
+      const score=video=>
+        (video.type==="Trailer"?100:0)+
+        (video.official?40:0)+
+        (video.iso_639_1==="en"?20:0)+
+        (video.size>=1080?10:video.size>=720?5:0)+
+        (video.name?.toLowerCase().includes("trailer")?3:0);
+      return score(b)-score(a);
+    });
+  const trailerKeys=[...new Set(trailerVideos.map(video=>video.key))];
   const imdbId=data.external_ids?.imdb_id||"";
   const backdropPaths=[...new Set([
     data.backdrop_path,
@@ -139,7 +148,8 @@ export default async function handler(req,res) {
     directorDetails,
     production,
     directorLabel:type==="series"&&creator&&!directorDetails?"CREATOR":"DIRECTOR",
-    trailerKey:trailer?.key||"",
+    trailerKey:trailerKeys[0]||"",
+    trailerKeys,
     imdbId,
     imdbRating,
     imdbRatingError,
