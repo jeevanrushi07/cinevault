@@ -353,8 +353,6 @@ function shell() {
 
 async function restoreAppRoute(route) {
   stopStageTrailer();
-  clearInterval(stageBackdropTimer);
-  stageBackdropTimer=null;
   $("#stage")?.remove();
   $("#profileImageViewer")?.remove();
   document.querySelectorAll(".modal").forEach(modal=>modal.remove());
