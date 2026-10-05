@@ -1019,8 +1019,10 @@ function renderCredits(movie) {
           ? `<img src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
           : `<span class="creditInitials">${esc(creditInitials(person.name))}</span>`}
       ${personPageUrl(person)?'</a>':"</span>"}
-      <a class="creditPersonSearch" href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Crew member")}" target="_blank" rel="noopener">${esc(person.name||"Crew member")}</a>
-      <button type="button" class="copyPersonName" data-copy-name="${esc(person.name||"Crew member")}" aria-label="Copy ${esc(person.name||"Crew member")}'s name">▢ Copy</button>
+      <span class="creditPersonHeading">
+        <a class="creditPersonSearch" href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Crew member")}" target="_blank" rel="noopener">${esc(person.name||"Crew member")}</a>
+        <button type="button" class="copyPersonName copyPersonCompact" data-copy-name="${esc(person.name||"Crew member")}" aria-label="Copy ${esc(person.name||"Crew member")}'s name" title="Copy name">▢</button>
+      </span>
       <div class="creditTags">${(person.jobs||[]).map(job=>`<span class="creditTag">${esc(job)}</span>`).join("")}</div>
       ${person.character?`<small>${esc(person.character)}</small>`:""}
     </article>`;
@@ -1152,8 +1154,10 @@ async function renderPerson(id) {
             : `<div class="personPortrait personPortraitFallback">${esc((person.name||"?").slice(0,1).toUpperCase())}</div>`}
           <div>
             <p class="muted">${esc(person.knownForDepartment||"FILM & TELEVISION")}</p>
-            <button type="button" class="copyPersonName personTitleCopy" data-copy-name="${esc(person.name||"Unknown person")}" aria-label="Copy ${esc(person.name||"Unknown person")}'s name">▢ Copy name</button>
-            <h1 class="personTitle"><a href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Unknown person")}" target="_blank" rel="noopener">${esc(person.name||"Unknown person")}</a></h1>
+            <div class="personTitleRow">
+              <h1 class="personTitle"><a href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Unknown person")}" target="_blank" rel="noopener">${esc(person.name||"Unknown person")}</a></h1>
+              <button type="button" class="copyPersonName personTitleCopy" data-copy-name="${esc(person.name||"Unknown person")}" aria-label="Copy ${esc(person.name||"Unknown person")}'s name" title="Copy name">▢</button>
+            </div>
             <div class="personMeta">
               ${person.birthday?`<span>Born ${esc(person.birthday)}${age!==""?` · ${age} years old`:""}</span>`:""}
               ${person.deathday?`<span>Died ${esc(person.deathday)}</span>`:""}
@@ -1904,8 +1908,10 @@ function stage(m,readOnly=false,options={}) {
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
             <span>${(m.type||"movie").toUpperCase()}</span>
-            <button type="button" class="copyMovieTitle" aria-label="Copy movie title">▢ Copy title</button>
-            <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
+            <div class="stageTitleRow">
+              <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
+              <button type="button" class="copyMovieTitle" aria-label="Copy movie title" title="Copy movie title">▢</button>
+            </div>
             ${m.year?`<span class="movieYear">${esc(m.year)}</span>`:""}
 
             <div class="genres">
