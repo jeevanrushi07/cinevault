@@ -590,7 +590,7 @@ async function show(tab, q = "", options = {}) {
           <span class="contactStatus"><i></i> DEVELOPER</span>
         </div>
         <div class="contactAction">
-          <a class="contactMailButton" href="${composeUrl}">
+          <a class="contactMailButton" href="${composeUrl}" target="_blank" rel="noopener">
             <span><small>FOR A PROBLEM OR SUGGESTION</small><b>Email Jeevan</b></span>
             <span aria-hidden="true">↗</span>
           </a>
