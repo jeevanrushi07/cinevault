@@ -805,7 +805,7 @@ async function loadArchiveRecommendations(libraryMovies) {
 
   const typeLabels={movie:"FILM",series:"SERIES"};
   rail.innerHTML=recommendations.map(recommendation=>`
-    <article class="archiveRecommendationCard">
+    <article class="archiveRecommendationCard" data-recommendation-item>
       <div class="archiveRecommendationPoster">
         <img src="${esc(img(recommendation.posterPath))}" alt="" loading="lazy">
         <span>${typeLabels[recommendation.type]||"FILM"}${recommendation.year?` · ${esc(recommendation.year)}`:""}</span>
@@ -813,16 +813,77 @@ async function loadArchiveRecommendations(libraryMovies) {
       <div class="archiveRecommendationInfo">
         <strong>${esc(recommendation.title||"Untitled")}</strong>
         ${recommendation.tmdbRating?`<small>TMDB ${Number(recommendation.tmdbRating).toFixed(1)}</small>`:""}
+        <button type="button" class="archiveRecommendationExpand" aria-expanded="false">MORE LIKE THIS <span>＋</span></button>
         <div class="archiveRecommendationActions">
           <button type="button" class="archiveRecommendationAdd" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}" data-status="want">＋ WATCHLIST</button>
           <button type="button" class="archiveRecommendationAdd archiveRecommendationCollect" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}" data-status="watched">＋ COLLECTION</button>
         </div>
+      </div>
+      <div class="archiveRecommendationExpansion" hidden>
+        <p>${esc(recommendation.overview||"Explore more titles with a similar feel.")}</p>
+        <span class="archiveSimilarHeading">SIMILAR PICKS</span>
+        <div class="archiveSimilarRail"><p class="archiveRecommendationStatus">Open to find similar films and series…</p></div>
       </div>
     </article>`).join("")+(errors.length?`<p class="archiveRecommendationError">${esc(errors.join(" "))}</p>`:"");
 
   rail.querySelectorAll(".archiveRecommendationAdd").forEach(button=>{
     button.addEventListener("click",()=>addRecommendedTitle(button,button.dataset.status));
   });
+  rail.querySelectorAll(".archiveRecommendationExpand").forEach(button=>{
+    button.addEventListener("click",()=>toggleSimilarRecommendations(button));
+  });
+}
+
+async function toggleSimilarRecommendations(button) {
+  const card=button.closest(".archiveRecommendationCard");
+  const expansion=card?.querySelector(".archiveRecommendationExpansion");
+  const rail=expansion?.querySelector(".archiveSimilarRail");
+  if (!card||!expansion||!rail) return;
+  const open=button.getAttribute("aria-expanded")==="true";
+  button.setAttribute("aria-expanded",String(!open));
+  button.innerHTML=open?"MORE LIKE THIS <span>＋</span>":"SIMILAR PICKS <span>−</span>";
+  card.classList.toggle("expanded",!open);
+  expansion.hidden=open;
+  if (open||rail.dataset.loaded==="true"||rail.dataset.loading==="true") return;
+
+  const id=card.querySelector(".archiveRecommendationAdd")?.dataset.id;
+  const type=card.querySelector(".archiveRecommendationAdd")?.dataset.type==="series"?"series":"movie";
+  if (!id) return;
+  rail.dataset.loading="true";
+  rail.innerHTML='<p class="archiveRecommendationStatus">Finding similar films and series…</p>';
+  try {
+    const params=new URLSearchParams({ids:id,type});
+    const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
+    const result=await readApiJson(response,"TMDB similar recommendations API");
+    if (!response.ok) throw new Error(result.error||"Could not load similar recommendations.");
+    const similar=(result.recommendations||[])
+      .filter(item=>String(item.id)!==String(id))
+      .filter(item=>!movies.some(movie=>String(movie.tmdbId)===String(item.id)))
+      .slice(0,8);
+    if (!similar.length) {
+      rail.innerHTML='<p class="archiveRecommendationStatus">No similar titles are available yet.</p>';
+    } else {
+      rail.innerHTML=similar.map(item=>`
+        <article class="archiveSimilarCard" data-recommendation-item>
+          <img src="${esc(img(item.posterPath))}" alt="" loading="lazy">
+          <span><b>${esc(item.title||"Untitled")}</b><small>${esc([item.type==="series"?"SERIES":"FILM",item.year].filter(Boolean).join(" · "))}</small></span>
+          <div class="archiveSimilarActions">
+            <button type="button" class="archiveRecommendationAdd" data-id="${esc(item.id)}" data-type="${esc(item.type)}" data-status="want" aria-label="Add ${esc(item.title)} to watchlist">＋ LIST</button>
+            <button type="button" class="archiveRecommendationAdd archiveRecommendationCollect" data-id="${esc(item.id)}" data-type="${esc(item.type)}" data-status="watched" aria-label="Add ${esc(item.title)} to collection">＋ SEEN</button>
+          </div>
+        </article>`).join("");
+      rail.querySelectorAll(".archiveRecommendationAdd").forEach(action=>{
+        action.addEventListener("click",()=>addRecommendedTitle(action,action.dataset.status));
+      });
+    }
+    rail.dataset.loaded="true";
+  } catch(error) {
+    console.error("Could not load similar TMDB recommendations.",error);
+    rail.innerHTML=`<p class="archiveRecommendationStatus">Could not load similar picks: ${esc(error.message||"TMDB request failed.")}</p>`;
+    rail.dataset.loaded="true";
+  } finally {
+    delete rail.dataset.loading;
+  }
 }
 
 async function addRecommendedTitle(button,status) {
@@ -830,8 +891,8 @@ async function addRecommendedTitle(button,status) {
   const type=button.dataset.type==="series"?"series":"movie";
   const targetStatus=status==="watched"?"watched":"want";
   if (!id) return;
-  const card=button.closest(".archiveRecommendationCard");
-  const actionButtons=card?.querySelectorAll(".archiveRecommendationAdd")||[button];
+  const item=button.closest("[data-recommendation-item]");
+  const actionButtons=item?.querySelectorAll(".archiveRecommendationAdd")||[button];
   actionButtons.forEach(action=>{
     action.disabled=true;
     if (action===button) action.textContent="ADDING…";
