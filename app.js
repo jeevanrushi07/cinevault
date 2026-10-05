@@ -1019,7 +1019,8 @@ function renderCredits(movie) {
           ? `<img src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
           : `<span class="creditInitials">${esc(creditInitials(person.name))}</span>`}
       ${personPageUrl(person)?'</a>':"</span>"}
-      <b>${esc(person.name||"Crew member")}</b>
+      <a class="creditPersonSearch" href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Crew member")}" target="_blank" rel="noopener">${esc(person.name||"Crew member")}</a>
+      <button type="button" class="copyPersonName" data-copy-name="${esc(person.name||"Crew member")}" aria-label="Copy ${esc(person.name||"Crew member")}'s name">▢ Copy</button>
       <div class="creditTags">${(person.jobs||[]).map(job=>`<span class="creditTag">${esc(job)}</span>`).join("")}</div>
       ${person.character?`<small>${esc(person.character)}</small>`:""}
     </article>`;
@@ -1151,7 +1152,8 @@ async function renderPerson(id) {
             : `<div class="personPortrait personPortraitFallback">${esc((person.name||"?").slice(0,1).toUpperCase())}</div>`}
           <div>
             <p class="muted">${esc(person.knownForDepartment||"FILM & TELEVISION")}</p>
-            <h1 class="personTitle">${esc(person.name||"Unknown person")}</h1>
+            <button type="button" class="copyPersonName personTitleCopy" data-copy-name="${esc(person.name||"Unknown person")}" aria-label="Copy ${esc(person.name||"Unknown person")}'s name">▢ Copy name</button>
+            <h1 class="personTitle"><a href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Unknown person")}" target="_blank" rel="noopener">${esc(person.name||"Unknown person")}</a></h1>
             <div class="personMeta">
               ${person.birthday?`<span>Born ${esc(person.birthday)}${age!==""?` · ${age} years old`:""}</span>`:""}
               ${person.deathday?`<span>Died ${esc(person.deathday)}</span>`:""}
@@ -1174,6 +1176,9 @@ async function renderPerson(id) {
           : '<p class="personEmpty">No filmography is available from TMDB.</p>'}
       </section>`;
     $("#personBack").onclick=closeAppDetail;
+    document.querySelectorAll(".copyPersonName").forEach(button=>{
+      button.onclick=()=>copyPersonName(button);
+    });
     document.querySelectorAll(".personCreditFilter").forEach(filter=>{
       filter.onclick=()=>{
         const category=filter.dataset.category;
@@ -1930,6 +1935,13 @@ function stage(m,readOnly=false,options={}) {
     </div>`);
 
   $("#stage").onclick=e=>{
+    const copyNameButton=e.target instanceof Element?e.target.closest(".copyPersonName"):null;
+    if (copyNameButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyPersonName(copyNameButton);
+      return;
+    }
     const personLink=e.target instanceof Element?e.target.closest("[data-person-id]"):null;
     if (personLink) {
       e.preventDefault();
@@ -1969,6 +1981,25 @@ async function copyMovieTitle() {
   } catch(error) {
     console.error("Could not copy movie title to clipboard.",error);
     alert("Could not copy the movie title. Check clipboard permissions and try again.");
+  }
+}
+
+async function copyPersonName(button) {
+  const name=button?.dataset.copyName;
+  if (!name) return;
+  try {
+    await navigator.clipboard.writeText(name);
+    const original=button.textContent;
+    button.textContent="✓ Copied";
+    button.setAttribute("aria-label","Person name copied");
+    setTimeout(()=>{
+      if (!button.isConnected) return;
+      button.textContent=original;
+      button.setAttribute("aria-label",`Copy ${name}'s name`);
+    },1600);
+  } catch(error) {
+    console.error("Could not copy person name to clipboard.",error);
+    alert("Could not copy the name. Check clipboard permissions and try again.");
   }
 }
 
