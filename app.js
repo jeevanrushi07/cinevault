@@ -31,6 +31,8 @@ let activeChatUser = null;
 let chatRefreshTimer = null;
 let notificationRefreshTimer = null;
 let activeStageMovie = null;
+let stageBackdropTimer = null;
+let stageBackdropIndex = 0;
 const copyFeedbackTimers = new WeakMap();
 
 function personPageUrl(person) {
@@ -290,6 +292,8 @@ function shell() {
     if (e.key==="Escape") {
       e.preventDefault();
       $("#profileImageViewer")?.remove();
+      clearInterval(stageBackdropTimer);
+      stageBackdropTimer=null;
       $("#stage")?.remove();
       document.querySelectorAll(".modal").forEach(modal=>modal.remove());
       $("#notificationPanel")?.classList.remove("open");
@@ -341,6 +345,8 @@ function shell() {
 }
 
 async function restoreAppRoute(route) {
+  clearInterval(stageBackdropTimer);
+  stageBackdropTimer=null;
   $("#stage")?.remove();
   $("#profileImageViewer")?.remove();
   document.querySelectorAll(".modal").forEach(modal=>modal.remove());
@@ -406,6 +412,8 @@ function initialAppRoute() {
 }
 
 function closeAppDetail() {
+  clearInterval(stageBackdropTimer);
+  stageBackdropTimer=null;
   const current=history.state;
   if (current?.detail?.type==="movie") {
     const returnDetail=current.detail.returnDetail||null;
@@ -1097,6 +1105,23 @@ async function refreshStageCredits(movie) {
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
     currentPanel.innerHTML=renderCredits(details);
+    const updatedMovie={...movie,backdropPaths:details.backdropPaths||[]};
+    if (activeStageMovie&&String(activeStageMovie.tmdbId)===String(movie.tmdbId)) {
+      activeStageMovie=updatedMovie;
+      const sequenceIndex=activeStageSequence.findIndex(item=>String(item.tmdbId)===String(movie.tmdbId));
+      if (sequenceIndex>=0) activeStageSequence[sequenceIndex]=updatedMovie;
+      const route=history.state;
+      if (route?.detail?.type==="movie"&&String(route.detail.id)===String(movie.tmdbId)) {
+        const sequence=Array.isArray(route.detail.sequence)?route.detail.sequence.map(item=>
+          String(item.tmdbId)===String(movie.tmdbId)?updatedMovie:item
+        ):route.detail.sequence;
+        history.replaceState({
+          ...route,
+          detail:{...route.detail,movie:updatedMovie,sequence}
+        },"",location.href);
+      }
+      rotateStageBackdrops(details.backdropPaths||[]);
+    }
   } catch(error) {
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
@@ -1870,6 +1895,8 @@ async function choose(r,status="watched") {
 function stage(m,readOnly=false,options={}) {
   if (!m) return;
 
+  clearInterval(stageBackdropTimer);
+  stageBackdropTimer=null;
   $("#stage")?.remove();
   activeStageMovie=m;
   if (Array.isArray(options.sequence)&&options.sequence.length) {
@@ -1921,7 +1948,9 @@ function stage(m,readOnly=false,options={}) {
         <button type="button" class="movieNavArrow movieNavPrevious ${movieIndex===0?"atSequenceEdge":""}" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" aria-disabled="${movieIndex===0}">‹</button>
         <button type="button" class="movieNavArrow movieNavNext ${movieIndex===activeStageSequence.length-1?"atSequenceEdge":""}" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" aria-disabled="${movieIndex===activeStageSequence.length-1}">›</button>`:""}
       <button type="button" class="x stageClose" onclick="closeAppDetail()" aria-label="Close movie details">×</button>
-      <div class="stagebg" data-read-only="${readOnly}" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(m.backdropPath||m.posterPath)}')">
+      <div class="stagebg" data-read-only="${readOnly}">
+        <div class="stageBackdropLayer active" id="stageBackdropA" aria-hidden="true"></div>
+        <div class="stageBackdropLayer" id="stageBackdropB" aria-hidden="true"></div>
         <div class="stageListControls" role="group" aria-label="Your movie lists">
           <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
           <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
@@ -1982,6 +2011,7 @@ function stage(m,readOnly=false,options={}) {
       closeAppDetail();
     }
   };
+  rotateStageBackdrops(m.backdropPaths?.length?m.backdropPaths:[m.backdropPath||m.posterPath].filter(Boolean));
   refreshStageCredits(m);
   $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
 
@@ -2027,6 +2057,37 @@ function showCopyFeedback(button) {
     button.classList.remove("copyFeedbackVisible");
     copyFeedbackTimers.delete(button);
   },2000));
+}
+
+function rotateStageBackdrops(paths) {
+  const images=[...new Set((paths||[]).filter(path=>typeof path==="string"&&path.startsWith("/")))];
+  if (!images.length||!$("#stage")) return;
+  clearInterval(stageBackdropTimer);
+  stageBackdropTimer=null;
+  stageBackdropIndex=0;
+  const layers=[$("#stageBackdropA"),$("#stageBackdropB")];
+  if (!layers[0]||!layers[1]) return;
+  const setImage=(layer,path)=>{
+    layer.style.backgroundImage=`linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url("${backdrop(path)}")`;
+  };
+  setImage(layers[0],images[0]);
+  layers[0].classList.add("active");
+  layers[1].classList.remove("active");
+  if (images.length<2) return;
+
+  stageBackdropTimer=setInterval(()=>{
+    if (!$("#stage")) {
+      clearInterval(stageBackdropTimer);
+      stageBackdropTimer=null;
+      return;
+    }
+    const current=stageBackdropIndex%2;
+    const next=1-current;
+    stageBackdropIndex=(stageBackdropIndex+1)%images.length;
+    setImage(layers[next],images[stageBackdropIndex]);
+    layers[next].classList.add("active");
+    layers[current].classList.remove("active");
+  },6500);
 }
 
 function navigateStageMovie(direction) {

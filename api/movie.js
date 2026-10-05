@@ -24,7 +24,7 @@ export default async function handler(req,res) {
 
   try {
     for (const endpoint of endpoints) {
-      response=await fetch(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(id)}?api_key=${encodeURIComponent(key)}&append_to_response=credits,videos,external_ids`);
+      response=await fetch(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(id)}?api_key=${encodeURIComponent(key)}&append_to_response=credits,videos,external_ids,images&include_image_language=en,null`);
       data=await readServiceJson(response,"TMDB");
       if (response.ok) {
         type=endpoint==="tv"?"series":"movie";
@@ -97,6 +97,13 @@ export default async function handler(req,res) {
     video.site==="YouTube"&&["Trailer","Teaser"].includes(video.type)
   );
   const imdbId=data.external_ids?.imdb_id||"";
+  const backdropPaths=[...new Set([
+    data.backdrop_path,
+    ...(data.images?.backdrops||[])
+      .slice()
+      .sort((a,b)=>(Number(b.vote_average)||0)-(Number(a.vote_average)||0))
+      .map(image=>image.file_path)
+  ].filter(path=>typeof path==="string"&&path.startsWith("/")))].slice(0,8);
   let imdbRating=null;
   let imdbRatingError="";
   const omdbKey=process.env.OMDB_API_KEY;
@@ -123,6 +130,7 @@ export default async function handler(req,res) {
     year:(data.release_date||data.first_air_date||"").slice(0,4),
     posterPath:data.poster_path,
     backdropPath:data.backdrop_path,
+    backdropPaths,
     overview:data.overview||"",
     genres:(data.genres||[]).map(genre=>genre.name),
     cast:castDetails.map(person=>person.name),
