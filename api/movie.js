@@ -49,6 +49,25 @@ export default async function handler(req,res) {
   const trailer=(data.videos?.results||[]).find(video=>
     video.site==="YouTube"&&["Trailer","Teaser"].includes(video.type)
   );
+  const imdbId=data.external_ids?.imdb_id||"";
+  let imdbRating=null;
+  let imdbRatingError="";
+  const omdbKey=process.env.OMDB_API_KEY;
+  if (!omdbKey&&imdbId) imdbRatingError="Configure OMDB_API_KEY in Vercel to load IMDb ratings.";
+  if (imdbId&&omdbKey) {
+    try {
+      const ratingResponse=await fetch(`https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(omdbKey)}`);
+      const ratingData=await ratingResponse.json();
+      if (ratingResponse.ok&&ratingData.Response!=="False"&&ratingData.imdbRating&&ratingData.imdbRating!=="N/A") {
+        imdbRating=ratingData.imdbRating;
+      } else {
+        imdbRatingError=ratingData.Error||"IMDb rating is unavailable.";
+      }
+    } catch (error) {
+      console.error("IMDb rating lookup failed:",error);
+      imdbRatingError="Could not load the IMDb rating.";
+    }
+  }
 
   return res.status(200).json({
     tmdbId:data.id,
@@ -65,8 +84,14 @@ export default async function handler(req,res) {
     directorDetails,
     directorLabel:type==="series"&&creator&&!directorPerson?"CREATOR":"DIRECTOR",
     trailerKey:trailer?.key||"",
-    imdbId:data.external_ids?.imdb_id||"",
+    imdbId,
+    imdbRating,
+    imdbRatingError,
     tmdbRating:data.vote_average,
+    runtimeMinutes:data.runtime||null,
+    episodeRuntime:data.episode_run_time||[],
+    seasonCount:data.number_of_seasons||null,
+    episodeCount:data.number_of_episodes||null,
     type,
     status:"watched",
     personalNote:"",

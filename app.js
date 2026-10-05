@@ -802,12 +802,47 @@ function creditInitials(name) {
   return String(name||"?").split(/\s+/).slice(0,2).map(part=>part[0]||"").join("").toUpperCase();
 }
 
+function formatRuntime(minutes) {
+  const value=Number(minutes);
+  if (!Number.isFinite(value)||value<=0) return "";
+  const hours=Math.floor(value/60);
+  const remainder=value%60;
+  return hours?`${hours}h ${remainder}m`:`${remainder} min`;
+}
+
+function renderMovieFacts(movie) {
+  const imdbUrl=movie.imdbId?`https://www.imdb.com/title/${encodeURIComponent(movie.imdbId)}/`:"";
+  const imdbRating=movie.imdbRating
+    ? `${esc(movie.imdbRating)}/10 IMDb`
+    : movie.imdbRatingError
+      ? "IMDb rating unavailable"
+      : "IMDb rating not loaded";
+  const runtime=movie.type==="series"
+    ? [
+        movie.seasonCount?`${movie.seasonCount} season${movie.seasonCount===1?"":"s"}`:"",
+        movie.episodeCount?`${movie.episodeCount} episode${movie.episodeCount===1?"":"s"}`:"",
+        (movie.episodeRuntime||[]).length
+          ? `~${[...new Set(movie.episodeRuntime)].map(formatRuntime).filter(Boolean).join("–")} per episode`
+          : ""
+      ].filter(Boolean).join(" · ")
+    : formatRuntime(movie.runtimeMinutes);
+  return `
+    <div class="movieFacts">
+      ${imdbUrl
+        ? `<a class="imdbScore ${movie.imdbRating?"":"imdbScoreUnavailable"}" href="${imdbUrl}" target="_blank" rel="noopener" title="${esc(movie.imdbRatingError||"Configure OMDB_API_KEY in Vercel to load IMDb ratings.")}" aria-label="${esc(imdbRating)}; open IMDb title page">★ ${imdbRating} ↗</a>`
+        : `<span class="imdbScore imdbScoreUnavailable">${imdbRating}</span>`}
+      ${Number(movie.tmdbRating)>0?`<span class="tmdbScore">★ ${Number(movie.tmdbRating).toFixed(1)} TMDB</span>`:""}
+      ${runtime?`<span class="runtimeFact">${movie.type==="series"?"SERIES":"RUNTIME"} · ${esc(runtime)}</span>`:""}
+    </div>`;
+}
+
 function renderCredits(movie) {
   const director=movie.directorDetails||{name:movie.director||"",profilePath:""};
   const cast=Array.isArray(movie.castDetails)&&movie.castDetails.length
     ? movie.castDetails
     : (movie.cast||[]).map(person=>typeof person==="string"?{name:person}:person);
   return `
+    ${renderMovieFacts(movie)}
     <div class="creditSection">
       <span class="creditSectionLabel">${esc(movie.directorLabel||"DIRECTOR")}</span>
       ${director.name
@@ -1484,7 +1519,6 @@ function stage(m,readOnly=false) {
   $("#stage")?.remove();
 
   const movieSearchUrl=`https://www.google.com/search?q=${encodeURIComponent(m.title)}`;
-  const imdbUrl=`https://www.google.com/search?q=${encodeURIComponent(m.title+" IMDb")}`;
   const trailerUrl=m.trailerKey
     ? `https://www.youtube.com/watch?v=${m.trailerKey}`
     : `https://www.youtube.com/results?search_query=${encodeURIComponent(m.title+" trailer")}`;
@@ -1497,12 +1531,7 @@ function stage(m,readOnly=false) {
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
             <span>${(m.type||"movie").toUpperCase()} · ${m.year||""}</span>
-            <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a> <a target="_blank" rel="noopener" href="${imdbUrl}">↗</a></h1>
-
-            <div class="ratings">
-              ${m.imdbId ? "IMDb" : ""}
-              ${m.tmdbRating ? `★ ${Number(m.tmdbRating).toFixed(1)} TMDB` : ""}
-            </div>
+            <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
 
             <div class="genres">
               ${(m.genres||[]).map(g=>`<i>${esc(g)}</i>`).join("")}

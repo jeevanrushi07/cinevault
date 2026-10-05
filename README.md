@@ -25,6 +25,7 @@ Set these in Vercel Project Settings -> Environment Variables:
 - `SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` — server only; NEVER put this in frontend code or GitHub.
 - `TMDB_API_KEY`
+- `OMDB_API_KEY` — optional; enables IMDb ratings in movie and series details.
 
 After adding/changing environment variables, redeploy.
 
