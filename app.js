@@ -2566,6 +2566,15 @@ function stage(m,readOnly=false,options={}) {
             </div>
           </div>
         </div>
+        <section class="stageRecommendations" id="stageRecommendations" aria-label="Recommended titles">
+          <div class="stageRecommendationsHead">
+            <span>MORE FOR YOUR SCREENING</span>
+            <h2>Because you opened ${esc(m.title||"this title")}.</h2>
+          </div>
+          <div class="stageRecommendationRail" id="stageRecommendationRail" aria-live="polite">
+            <p class="archiveRecommendationStatus">Finding titles with a similar feel…</p>
+          </div>
+        </section>
       </div>
     </div>`);
 
@@ -2591,6 +2600,7 @@ function stage(m,readOnly=false,options={}) {
   };
   setupStageTrailer(m.trailerKeys?.length?m.trailerKeys:m.trailerKey,m);
   refreshStageCredits(m);
+  loadStageRecommendations(m);
   $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
 
   if (!readOnly) $("#note").onblur=async e=>{
@@ -2600,6 +2610,51 @@ function stage(m,readOnly=false,options={}) {
       alert(err.message);
     }
   };
+}
+
+async function loadStageRecommendations(movie) {
+  const rail=$("#stageRecommendationRail");
+  if (!rail||!movie?.tmdbId) return;
+  const stageId=String(movie.tmdbId);
+  try {
+    const params=new URLSearchParams({
+      ids:stageId,
+      type:movie.type==="series"?"series":"movie"
+    });
+    const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
+    const result=await readApiJson(response,"TMDB similar recommendations API");
+    if (!response.ok) throw new Error(result.error||"Could not load related recommendations.");
+    if ($("#stage")?.dataset.movieId!==stageId) return;
+    const recommendations=(result.recommendations||[])
+      .filter(item=>String(item.id)!==stageId)
+      .filter(item=>!movies.some(saved=>String(saved.tmdbId)===String(item.id)))
+      .slice(0,8);
+    if (!recommendations.length) {
+      rail.innerHTML='<p class="archiveRecommendationStatus">No new related titles are available right now.</p>';
+      return;
+    }
+    rail.innerHTML=recommendations.map(item=>`
+      <article class="stageRecommendationCard" data-recommendation-item>
+        <button type="button" class="stageRecommendationOpen archiveRecommendationOpen" aria-label="Open details for ${esc(item.title||"this recommendation")}">
+          <img src="${esc(img(item.posterPath))}" alt="" loading="lazy">
+          <span><b>${esc(item.title||"Untitled")}</b><small>${esc([item.type==="series"?"SERIES":"FILM",item.year].filter(Boolean).join(" · "))}</small></span>
+        </button>
+        <div class="stageRecommendationActions">
+          <button type="button" class="archiveRecommendationAdd" data-id="${esc(item.id)}" data-type="${esc(item.type)}" data-status="want">＋ WATCHLIST</button>
+          <button type="button" class="archiveRecommendationAdd archiveRecommendationCollect" data-id="${esc(item.id)}" data-type="${esc(item.type)}" data-status="watched">＋ COLLECTION</button>
+        </div>
+      </article>`).join("");
+    rail.querySelectorAll(".stageRecommendationOpen").forEach(button=>{
+      button.addEventListener("click",()=>openRecommendedTitle(button.closest(".stageRecommendationCard")));
+    });
+    rail.querySelectorAll(".archiveRecommendationAdd").forEach(button=>{
+      button.addEventListener("click",()=>addRecommendedTitle(button,button.dataset.status));
+    });
+  } catch(error) {
+    if ($("#stage")?.dataset.movieId!==stageId) return;
+    console.error("Could not load related recommendations for the title details.",error);
+    rail.innerHTML=`<p class="archiveRecommendationStatus">Could not load related titles: ${esc(error.message||"TMDB request failed.")}</p>`;
+  }
 }
 
 async function copyMovieTitle(button) {
