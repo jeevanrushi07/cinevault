@@ -43,6 +43,7 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - TMDB live title search
 - Top-bar search filters your archive, separates already-saved titles, and finds titles to add as watched or want-to-watch
 - Top-right logout control
+- Profile pictures from online URLs, watched movie posters, or character images (no image upload)
 - Network directory with private messaging
 - Notification bell for new messages and library-sharing changes
 - Movie titles open a web search for that title

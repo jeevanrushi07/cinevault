@@ -1,7 +1,7 @@
 const $ = (s) => document.querySelector(s);
 
 const img = (p) => p
-  ? `https://image.tmdb.org/t/p/w780${p}`
+  ? /^https?:\/\//i.test(p) ? p : `https://image.tmdb.org/t/p/w780${p}`
   : `https://placehold.co/500x750/111118/eee?text=No+Poster`;
 
 const backdrop = (p) => p
@@ -88,6 +88,12 @@ function matches(m, q) {
     ...(m.genres || []), ...(m.cast || [])
   ].filter(Boolean).join(" ").toLowerCase().includes(q);
 }
+
+document.addEventListener("click",event=>{
+  if (event.target instanceof Element && event.target.classList.contains("modal")) {
+    event.target.remove();
+  }
+});
 
 async function initSupabase() {
   const r = await fetch("/api/config");
@@ -222,7 +228,10 @@ function shell() {
         <div class="side">
           <button id="add">＋ Add title</button>
           <button id="share">⇧ Share library</button>
-          <button id="profile">@${esc(profile?.username || "user")}</button>
+          <button id="profile" class="profileButton">
+            ${profile?.avatar?`<img src="${esc(img(profile.avatar))}" alt="">`:""}
+            <span>@${esc(profile?.username || "user")}</span>
+          </button>
           <button id="settings">⚙ Settings</button>
           <button id="logout">↪ Logout</button>
         </div>
@@ -459,7 +468,7 @@ async function renderNetwork() {
     const pageSize=500;
     for (let start=0;;start+=pageSize) {
       const {data,error}=await supabaseClient.from("profiles")
-        .select("id,username,display_name")
+        .select("id,username,display_name,avatar")
         .neq("id",currentUser.id)
         .order("username")
         .range(start,start+pageSize-1);
@@ -514,7 +523,9 @@ async function renderNetwork() {
 function networkUserRows(users,selectedId) {
   return users.map(user=>`
     <button class="networkUser ${user.id===selectedId?"selected":""}" data-user-id="${user.id}">
-      <span class="networkAvatar">${esc((user.display_name||user.username).slice(0,1).toUpperCase())}</span>
+      <span class="networkAvatar">${user.avatar
+        ? `<img src="${esc(img(user.avatar))}" alt="">`
+        : esc((user.display_name||user.username).slice(0,1).toUpperCase())}</span>
       <span><b>@${esc(user.username)}</b><small>${esc(user.display_name||"CineVault member")}</small></span>
       <span class="networkUserAction">Chat</span>
     </button>`).join("")||'<p class="muted networkEmpty">No users found.</p>';
@@ -530,7 +541,7 @@ async function openChat(userId) {
   const user=networkUsers.find(person=>person.id===userId);
   if (!user) {
     const {data,error}=await supabaseClient.from("profiles")
-      .select("id,username,display_name").eq("id",userId).maybeSingle();
+      .select("id,username,display_name,avatar").eq("id",userId).maybeSingle();
     if (error) return alert(`Could not open this conversation: ${error.message}`);
     if (!data) return alert("This user is no longer available.");
     activeChatUser=data;
@@ -1484,24 +1495,129 @@ async function settingsModal() {
   };
 }
 
+function profileImageSuggestions() {
+  const suggestions=[
+    ...movies.filter(movie=>movie.status==="watched"&&movie.posterPath).map(movie=>({
+      url:img(movie.posterPath),label:movie.title
+    })),
+    ...characters.filter(character=>character.poster).map(character=>({
+      url:img(character.poster),label:character.character_name||character.actor_name||"Character"
+    }))
+  ];
+  return [...new Map(suggestions.map(item=>[item.url,item])).values()].slice(0,12);
+}
+
 function profileModal() {
+  const avatar=profile?.avatar?img(profile.avatar):"";
+  const suggestions=profileImageSuggestions();
   document.body.insertAdjacentHTML("beforeend",`
-    <div class="modal">
+    <div class="modal" id="profileModal">
       <div class="box">
         <button class="x" onclick="this.closest('.modal').remove()">×</button>
         <span>PROFILE</span>
         <h2>Your archive identity.</h2>
         <input class="field" id="pn" value="${esc(profile?.display_name||profile?.username||"")}" placeholder="Display name">
+        <div class="profilePhotoSection">
+          <label class="shareExpiryLabel" for="profileAvatarUrl">PROFILE PICTURE · ONLINE IMAGE LINK</label>
+          <div id="avatarDrop" class="avatarDrop">
+            <img id="avatarPreview" src="${esc(avatar)}" alt="Profile picture preview" ${avatar?"":"hidden"}>
+            <span id="avatarDropHint">${avatar?"Current profile picture":"Drop an image from a webpage here"}</span>
+          </div>
+          <input class="field" id="profileAvatarUrl" type="url" value="${esc(avatar)}" placeholder="Paste an image URL (https://…)" autocomplete="url">
+          <p class="muted profilePhotoHint">Images stay hosted at their original online source; CineVault saves only the image link. To use Google Images, open a search and copy or drag the image itself.</p>
+          <a class="profileImageSearch" href="https://www.google.com/search?tbm=isch&q=${encodeURIComponent((profile?.display_name||profile?.username||"movie character")+" portrait")}" target="_blank" rel="noopener">Search images online ↗</a>
+          ${suggestions.length?`
+            <p class="muted profileSuggestionsLabel">SUGGESTIONS FROM YOUR WATCHED MOVIES AND CHARACTERS</p>
+            <div class="profileSuggestions">
+              ${suggestions.map(item=>`
+                <button type="button" class="profileSuggestion" data-avatar-url="${esc(item.url)}" title="${esc(item.label)}">
+                  <img src="${esc(item.url)}" alt="${esc(item.label)}">
+                </button>`).join("")}
+            </div>`:""}
+          <small id="avatarMessage" class="muted profilePhotoHint"></small>
+        </div>
         <button class="primary full" onclick="saveProfile(this)">Save profile</button>
       </div>
     </div>`);
+
+  const urlInput=$("#profileAvatarUrl");
+  const preview=$("#avatarPreview");
+  const drop=$("#avatarDrop");
+  const setAvatar=value=>{
+    const url=normalizeImageUrl(value);
+    if (!url) {
+      $("#avatarMessage").textContent="Use a valid http or https image URL.";
+      return false;
+    }
+    urlInput.value=url;
+    preview.src=url;
+    preview.hidden=false;
+    $("#avatarDropHint").textContent="Profile picture preview";
+    $("#avatarMessage").textContent="Preview loaded from the original image source.";
+    return true;
+  };
+
+  urlInput.oninput=()=> {
+    if (!urlInput.value.trim()) {
+      preview.removeAttribute("src");
+      preview.hidden=true;
+      $("#avatarDropHint").textContent="Drop an image from a webpage here";
+      $("#avatarMessage").textContent="No profile picture selected.";
+      return;
+    }
+    setAvatar(urlInput.value);
+  };
+  preview.onerror=()=>$("#avatarMessage").textContent="Could not load that image. Try a direct image link.";
+  document.querySelectorAll(".profileSuggestion").forEach(button=>{
+    button.onclick=()=>setAvatar(button.dataset.avatarUrl);
+  });
+  drop.ondragover=event=>{
+    event.preventDefault();
+    drop.classList.add("dragOver");
+  };
+  drop.ondragleave=()=>drop.classList.remove("dragOver");
+  drop.ondrop=event=>{
+    event.preventDefault();
+    drop.classList.remove("dragOver");
+    const transfer=event.dataTransfer;
+    let droppedUrl="";
+    const html=transfer.getData("text/html");
+    if (html) {
+      const doc=new DOMParser().parseFromString(html,"text/html");
+      droppedUrl=doc.querySelector("img")?.src||doc.querySelector("a")?.href||"";
+    }
+    if (!droppedUrl) {
+      droppedUrl=transfer.getData("text/uri-list").split(/\r?\n/).find(line=>line&&!line.startsWith("#"))||"";
+    }
+    if (!droppedUrl) droppedUrl=transfer.getData("text/plain").trim();
+    if (!setAvatar(droppedUrl)) {
+      $("#avatarMessage").textContent="Drop an online image or image link, or paste its URL. Local files are not uploaded.";
+    }
+  };
+}
+
+function normalizeImageUrl(value) {
+  try {
+    const url=new URL(String(value||"").trim());
+    return ["http:","https:"].includes(url.protocol)&&!url.username&&!url.password
+      ? url.href
+      : "";
+  } catch {
+    return "";
+  }
 }
 
 window.saveProfile=async btn=>{
   const display_name=$("#pn").value.trim()||profile.username;
+  const avatarValue=$("#profileAvatarUrl").value.trim();
+  const avatar=avatarValue?normalizeImageUrl(avatarValue):null;
+  if (avatarValue&&!avatar) {
+    $("#avatarMessage").textContent="Use a valid http or https image URL.";
+    return;
+  }
 
   const {data,error}=await supabaseClient.from("profiles")
-    .update({display_name})
+    .update({display_name,avatar})
     .eq("id",currentUser.id)
     .select().single();
 
