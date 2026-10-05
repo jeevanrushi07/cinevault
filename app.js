@@ -894,11 +894,20 @@ function formatRuntime(minutes) {
 
 function renderMovieFacts(movie) {
   const imdbUrl=movie.imdbId?`https://www.imdb.com/title/${encodeURIComponent(movie.imdbId)}/`:"";
-  const imdbRating=movie.imdbRating
-    ? `${esc(movie.imdbRating)}/10 IMDb`
-    : movie.imdbRatingError
-      ? "IMDb rating unavailable"
-      : "IMDb rating not loaded";
+  const imdbRating=String(movie.imdbRating||"").trim();
+  const tmdbRating=Number(movie.tmdbRating);
+  const hasImdbRating=imdbRating!==""&&imdbRating!=="N/A";
+  const hasTmdbRating=Number.isFinite(tmdbRating)&&tmdbRating>0;
+  const displayedScore=hasImdbRating
+    ? `★ ${esc(imdbRating)}/10 IMDb`
+    : hasTmdbRating
+      ? `★ ${tmdbRating.toFixed(1)}/10 TMDB`
+      : "IMDb rating unavailable";
+  const ratingTitle=hasImdbRating
+    ? "IMDb user rating; open IMDb title page"
+    : hasTmdbRating
+      ? "IMDb rating unavailable; showing TMDB user rating. Open IMDb title page"
+      : movie.imdbRatingError||"IMDb rating is unavailable.";
   const runtime=movie.type==="series"
     ? [
         movie.seasonCount?`${movie.seasonCount} season${movie.seasonCount===1?"":"s"}`:"",
@@ -911,9 +920,9 @@ function renderMovieFacts(movie) {
   return `
     <div class="movieFacts">
       ${imdbUrl
-        ? `<a class="imdbScore ${movie.imdbRating?"":"imdbScoreUnavailable"}" href="${imdbUrl}" target="_blank" rel="noopener" title="${esc(movie.imdbRatingError||"Configure OMDB_API_KEY in Vercel to load IMDb ratings.")}" aria-label="${esc(imdbRating)}; open IMDb title page">★ ${imdbRating} ↗</a>`
-        : `<span class="imdbScore imdbScoreUnavailable">${imdbRating}</span>`}
-      ${Number(movie.tmdbRating)>0?`<span class="tmdbScore">★ ${Number(movie.tmdbRating).toFixed(1)} TMDB</span>`:""}
+        ? `<a class="imdbScore ${hasImdbRating||hasTmdbRating?"":"imdbScoreUnavailable"}" href="${imdbUrl}" target="_blank" rel="noopener" title="${esc(ratingTitle)}" aria-label="${esc(displayedScore)}; open IMDb title page">${displayedScore} ↗</a>`
+        : `<span class="imdbScore ${hasImdbRating||hasTmdbRating?"":"imdbScoreUnavailable"}" title="${esc(ratingTitle)}">${displayedScore}</span>`}
+      ${hasImdbRating&&hasTmdbRating?`<span class="tmdbScore">★ ${tmdbRating.toFixed(1)} TMDB</span>`:""}
       ${runtime?`<span class="runtimeFact">${movie.type==="series"?"SERIES":"RUNTIME"} · ${esc(runtime)}</span>`:""}
     </div>`;
 }
