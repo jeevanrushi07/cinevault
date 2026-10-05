@@ -1899,6 +1899,7 @@ function stage(m,readOnly=false,options={}) {
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
             <span>${(m.type||"movie").toUpperCase()}</span>
+            <button type="button" class="copyMovieTitle" aria-label="Copy movie title">▢ Copy title</button>
             <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
             ${m.year?`<span class="movieYear">${esc(m.year)}</span>`:""}
 
@@ -1941,6 +1942,7 @@ function stage(m,readOnly=false,options={}) {
     }
   };
   refreshStageCredits(m);
+  $("#stage .copyMovieTitle").onclick=copyMovieTitle;
 
   if (!readOnly) $("#note").onblur=async e=>{
     try {
@@ -1949,6 +1951,25 @@ function stage(m,readOnly=false,options={}) {
       alert(err.message);
     }
   };
+}
+
+async function copyMovieTitle() {
+  if (!activeStageMovie?.title) return;
+  try {
+    await navigator.clipboard.writeText(activeStageMovie.title);
+    const button=$("#stage .copyMovieTitle");
+    if (!button) return;
+    button.textContent="✓ Copied";
+    button.setAttribute("aria-label","Movie title copied");
+    setTimeout(()=>{
+      if (!button.isConnected) return;
+      button.textContent="▢ Copy title";
+      button.setAttribute("aria-label","Copy movie title");
+    },1600);
+  } catch(error) {
+    console.error("Could not copy movie title to clipboard.",error);
+    alert("Could not copy the movie title. Check clipboard permissions and try again.");
+  }
 }
 
 function navigateStageMovie(direction) {
