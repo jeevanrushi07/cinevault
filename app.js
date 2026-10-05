@@ -219,7 +219,11 @@ function shell() {
           <small>PERSONAL FILM ARCHIVE</small>
         </div>
         <nav>
-          <button data-tab="archive">◉ Archive</button>
+          <button data-tab="archive" aria-keyshortcuts="Escape" title="Return to Archive (Esc)">
+            <span class="archiveNavIcon" aria-hidden="true">◉</span>
+            <span class="archiveNavLabel">Archive</span>
+            <kbd aria-hidden="true">ESC</kbd>
+          </button>
           <button data-tab="recent">◷ Recent</button>
           <button data-tab="shared">◎ Shared</button>
           <button data-tab="network">✉ Network</button>
@@ -264,10 +268,7 @@ function shell() {
   document.onkeydown=e=>{
     if (e.key==="Escape") {
       e.preventDefault();
-      if ($("#profileImageViewer")) {
-        $("#profileImageViewer").remove();
-        return;
-      }
+      $("#profileImageViewer")?.remove();
       $("#stage")?.remove();
       document.querySelectorAll(".modal").forEach(modal=>modal.remove());
       $("#notificationPanel")?.classList.remove("open");
