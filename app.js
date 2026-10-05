@@ -406,6 +406,22 @@ function initialAppRoute() {
 }
 
 function closeAppDetail() {
+  const current=history.state;
+  if (current?.detail?.type==="movie") {
+    const returnDetail=current.detail.returnDetail||null;
+    const route={
+      cineVaultRoute:true,
+      tab:current.tab||activeTab||"archive",
+      routeParam:current.routeParam||"",
+      detail:returnDetail
+    };
+    const hash=returnDetail?.type==="person"
+      ? `#person=${encodeURIComponent(returnDetail.id)}`
+      : `${location.pathname}${location.search}`;
+    history.replaceState(route,"",hash);
+    restoreAppRoute(route);
+    return;
+  }
   if (history.state?.detail) {
     history.back();
     return;
@@ -1874,7 +1890,12 @@ function stage(m,readOnly=false,options={}) {
       id:String(m.tmdbId),
       movie:m,
       readOnly,
-      sequence:activeStageSequence
+      sequence:activeStageSequence,
+      returnDetail:current.detail?.type==="movie"
+        ? current.detail.returnDetail||null
+        : current.detail?.type==="person"
+          ? {type:"person",id:String(current.detail.id)}
+          : null
     };
     if (current.detail?.type!=="movie"||String(current.detail.id)!==String(m.tmdbId)) {
       history.pushState({
@@ -1897,8 +1918,8 @@ function stage(m,readOnly=false,options={}) {
   document.body.insertAdjacentHTML("beforeend",`
     <div class="stage ${options.direction===1?"movieSlideNext":options.direction===-1?"movieSlidePrevious":""}" id="stage" data-movie-id="${esc(m.tmdbId)}">
       ${activeStageSequence.length>1?`
-        <button type="button" class="movieNavArrow movieNavPrevious" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" ${movieIndex===0?"disabled":""}>‹</button>
-        <button type="button" class="movieNavArrow movieNavNext" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" ${movieIndex===activeStageSequence.length-1?"disabled":""}>›</button>`:""}
+        <button type="button" class="movieNavArrow movieNavPrevious ${movieIndex===0?"atSequenceEdge":""}" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" aria-disabled="${movieIndex===0}">‹</button>
+        <button type="button" class="movieNavArrow movieNavNext ${movieIndex===activeStageSequence.length-1?"atSequenceEdge":""}" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" aria-disabled="${movieIndex===activeStageSequence.length-1}">›</button>`:""}
       <button type="button" class="x stageClose" onclick="closeAppDetail()" aria-label="Close movie details">×</button>
       <div class="stagebg" data-read-only="${readOnly}" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(m.backdropPath||m.posterPath)}')">
         <div class="stageListControls" role="group" aria-label="Your movie lists">
@@ -1955,6 +1976,7 @@ function stage(m,readOnly=false,options={}) {
       openPerson(personLink.dataset.personId);
       return;
     }
+    if (e.target instanceof Element&&e.target.closest(".movieNavArrow")) return;
     if (e.target===e.currentTarget||
       (e.target instanceof Element&&!e.target.closest(".stagebg,.movieNavArrow,.stageClose"))) {
       closeAppDetail();
