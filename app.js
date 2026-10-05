@@ -1828,8 +1828,9 @@ function stage(m,readOnly=false,options={}) {
         <div class="stagebody">
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
-            <span>${(m.type||"movie").toUpperCase()} · ${m.year||""}</span>
+            <span>${(m.type||"movie").toUpperCase()}</span>
             <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
+            ${m.year?`<span class="movieYear">${esc(m.year)}</span>`:""}
 
             <div class="genres">
               ${(m.genres||[]).map(g=>`<i>${esc(g)}</i>`).join("")}
