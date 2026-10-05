@@ -25,6 +25,7 @@ Set these in Vercel Project Settings -> Environment Variables:
 - `SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` — server only; NEVER put this in frontend code or GitHub.
 - `TMDB_API_KEY`
+- `YOUTUBE_API_KEY` — optional; enable YouTube Data API v3 for the Google Cloud project, then add the key here. It searches for embeddable trailers when TMDB trailers are unavailable or cannot be embedded.
 - `OMDB_API_KEY` — optional; enables IMDb ratings in movie and series details.
 
 After adding/changing environment variables, redeploy.

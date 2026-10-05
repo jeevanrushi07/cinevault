@@ -41,6 +41,8 @@ let stageTrailerIsIdle = false;
 let stageTrailerVideoId = "";
 let stageTrailerCandidates = [];
 let stageTrailerCandidateIndex = 0;
+let stageTrailerMovie = null;
+let stageTrailerFallbackSearched = false;
 let youtubePlayerApiPromise = null;
 let archiveSearchScrollHandler = null;
 let archiveSearchCompressed = false;
@@ -1174,9 +1176,7 @@ async function refreshStageCredits(movie) {
         },"",location.href);
       }
       setStageBackdrops(details.backdropPaths||[]);
-      if (updatedMovie.trailerKeys.length||updatedMovie.trailerKey) {
-        setupStageTrailer(updatedMovie.trailerKeys.length?updatedMovie.trailerKeys:updatedMovie.trailerKey);
-      }
+      setupStageTrailer(updatedMovie.trailerKeys.length?updatedMovie.trailerKeys:updatedMovie.trailerKey,updatedMovie);
     }
   } catch(error) {
     const currentPanel=$("#stageCredits");
@@ -2186,9 +2186,7 @@ function stage(m,readOnly=false,options={}) {
       closeAppDetail();
     }
   };
-  if (m.trailerKeys?.length||m.trailerKey) {
-    setupStageTrailer(m.trailerKeys?.length?m.trailerKeys:m.trailerKey);
-  }
+  setupStageTrailer(m.trailerKeys?.length?m.trailerKeys:m.trailerKey,m);
   refreshStageCredits(m);
   $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
 
@@ -2291,6 +2289,8 @@ function stopStageTrailer() {
   stageTrailerVideoId="";
   stageTrailerCandidates=[];
   stageTrailerCandidateIndex=0;
+  stageTrailerMovie=null;
+  stageTrailerFallbackSearched=false;
   if (stageTrailerPlayer) {
     stageTrailerPlayer.destroy();
     stageTrailerPlayer=null;
@@ -2298,17 +2298,18 @@ function stopStageTrailer() {
   $("#stage")?.classList.remove("trailerVisible");
 }
 
-function setupStageTrailer(videoId) {
+function setupStageTrailer(videoId,movie=activeStageMovie) {
   const holder=$("#stageTrailerPlayer");
   const stageElement=$("#stage");
   const candidates=[...new Set((Array.isArray(videoId)?videoId:[videoId]).filter(key=>typeof key==="string"&&key.trim()))];
-  if (!holder||!stageElement||!candidates.length||trailerReadMode) return;
+  if (!holder||!stageElement||!movie||trailerReadMode) return;
   stopStageTrailer();
   const generation=stageTrailerGeneration;
   stageTrailerIsIdle=false;
   stageTrailerCandidates=candidates;
   stageTrailerCandidateIndex=0;
-  stageTrailerVideoId=stageTrailerCandidates[0];
+  stageTrailerVideoId=stageTrailerCandidates[0]||"";
+  stageTrailerMovie={title:movie.title||"",year:movie.year||"",type:movie.type||"movie"};
   stageTrailerPointerHandler=()=>{
     stageTrailerActivity();
   };
@@ -2324,9 +2325,21 @@ function scheduleStageTrailer(generation=stageTrailerGeneration) {
 }
 
 async function startStageTrailerAfterIdle(generation) {
-  if (generation!==stageTrailerGeneration||trailerReadMode||!stageTrailerVideoId||!$("#stageTrailerPlayer")) return;
+  if (generation!==stageTrailerGeneration||trailerReadMode||!stageTrailerMovie||!$("#stageTrailerPlayer")) return;
   stageTrailerIsIdle=true;
   try {
+    if (!stageTrailerCandidates.length&&!stageTrailerFallbackSearched) {
+      const fallback=await searchYouTubeTrailerCandidates(generation);
+      if (generation!==stageTrailerGeneration||!stageTrailerIsIdle||trailerReadMode) return;
+      if (fallback.error||!stageTrailerCandidates.length) {
+        showStageTrailerFallback(fallback.error);
+        return;
+      }
+    }
+    if (!stageTrailerCandidates.length) {
+      showStageTrailerFallback("No embeddable trailers were found.");
+      return;
+    }
     const YT=await loadYouTubePlayerApi();
     if (generation!==stageTrailerGeneration||!stageTrailerIsIdle||trailerReadMode||!$("#stageTrailerPlayer")) return;
     if (!stageTrailerPlayer) {
@@ -2368,13 +2381,23 @@ function tryNextStageTrailer(errorCode,generation=stageTrailerGeneration) {
   const nextIndex=stageTrailerCandidateIndex+1;
   if (nextIndex>=stageTrailerCandidates.length) {
     $("#stage")?.classList.remove("trailerVisible");
-    const fallback=$("#stageTrailerFallback");
-    if (fallback) {
-      fallback.href=`https://www.youtube.com/watch?v=${encodeURIComponent(stageTrailerCandidates[0])}`;
-      fallback.hidden=false;
-      fallback.title=`YouTube blocked all ${stageTrailerCandidates.length} trailer embeds (last error ${errorCode}). Open the trailer directly on YouTube.`;
+    if (!stageTrailerFallbackSearched) {
+      searchYouTubeTrailerCandidates(generation).then(result=>{
+        if (generation!==stageTrailerGeneration) return;
+        if (result.trailers?.length) {
+          if (stageTrailerCandidateIndex+1<stageTrailerCandidates.length) {
+            stageTrailerCandidateIndex++;
+            stageTrailerVideoId=stageTrailerCandidates[stageTrailerCandidateIndex];
+            if (stageTrailerIsIdle) stageTrailerPlayer?.loadVideoById(stageTrailerVideoId);
+            else stageTrailerPlayer?.cueVideoById(stageTrailerVideoId);
+            return;
+          }
+        }
+        showStageTrailerFallback(result.error||`All embedded trailer candidates failed (YouTube error ${errorCode}).`);
+      });
+      return;
     }
-    console.error(`All ${stageTrailerCandidates.length} embedded trailer candidates failed. Last YouTube player error: ${errorCode}.`);
+    showStageTrailerFallback(`All embedded trailer candidates failed (YouTube error ${errorCode}).`);
     return;
   }
   stageTrailerCandidateIndex=nextIndex;
@@ -2386,6 +2409,42 @@ function tryNextStageTrailer(errorCode,generation=stageTrailerGeneration) {
   } else {
     stageTrailerPlayer?.cueVideoById({videoId:stageTrailerVideoId,suggestedQuality:"hd720"});
   }
+}
+
+async function searchYouTubeTrailerCandidates(generation) {
+  if (stageTrailerFallbackSearched||!stageTrailerMovie) return {trailers:[]};
+  stageTrailerFallbackSearched=true;
+  const params=new URLSearchParams({
+    title:stageTrailerMovie.title,
+    year:String(stageTrailerMovie.year||""),
+    type:stageTrailerMovie.type
+  });
+  try {
+    const response=await fetch(`/api/trailers?${params}`);
+    const result=await response.json().catch(()=>({}));
+    if (generation!==stageTrailerGeneration) return {trailers:[]};
+    if (!response.ok) return {trailers:[],error:result.error||"YouTube trailer search failed."};
+    const currentIds=new Set(stageTrailerCandidates);
+    const trailers=(result.trailers||[]).filter(id=>typeof id==="string"&&!currentIds.has(id));
+    stageTrailerCandidates.push(...trailers);
+    if (!stageTrailerVideoId&&stageTrailerCandidates.length) {
+      stageTrailerCandidateIndex=0;
+      stageTrailerVideoId=stageTrailerCandidates[0];
+    }
+    return {trailers};
+  } catch(error) {
+    if (generation===stageTrailerGeneration) console.error("YouTube trailer fallback lookup failed.",error);
+    return {trailers:[],error:error.message||"YouTube trailer search failed."};
+  }
+}
+
+function showStageTrailerFallback(message="") {
+  const fallback=$("#stageTrailerFallback");
+  if (!fallback||!stageTrailerMovie) return;
+  const query=[stageTrailerMovie.title,stageTrailerMovie.year,"trailer"].filter(Boolean).join(" ");
+  fallback.href=`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+  fallback.hidden=false;
+  fallback.title=message||"Open trailer search results on YouTube.";
 }
 
 function stageTrailerActivity() {
@@ -2412,8 +2471,11 @@ window.setTrailerReadMode=enabled=>{
   localStorage.setItem("cinevault-read-mode",String(trailerReadMode));
   if (trailerReadMode) {
     stopStageTrailer();
-  } else if (activeStageMovie?.trailerKey) {
-    setupStageTrailer(activeStageMovie.trailerKeys?.length?activeStageMovie.trailerKeys:activeStageMovie.trailerKey);
+  } else if (activeStageMovie) {
+    setupStageTrailer(
+      activeStageMovie.trailerKeys?.length?activeStageMovie.trailerKeys:activeStageMovie.trailerKey,
+      activeStageMovie
+    );
   }
 };
 
