@@ -18,6 +18,7 @@ let currentUser = null;
 let profile = null;
 let movies = [];
 let characters = [];
+let favoritePeople = [];
 let incomingShares = [];
 let outgoingShares = [];
 let activeTab = "archive";
@@ -57,6 +58,9 @@ let archiveSearchScrollHandler = null;
 let archiveSearchCompressed = false;
 let archiveDecadeFilter = "";
 let archiveRecommendationRequest = 0;
+let favoritePeopleRecommendationRequest = 0;
+let favoritePersonSearchRequest = 0;
+let favoritePersonSearchTimer = null;
 let headerSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[],people:[]};
 let addSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[],people:[]};
 const googleSearchStates={
@@ -169,15 +173,17 @@ async function loadData() {
   const { data: { user } } = await supabaseClient.auth.getUser();
   if (!user) {
     currentUser = null;
+    favoritePeople = [];
     return;
   }
 
   currentUser = user;
 
-  const [p, m, c, s, n] = await Promise.all([
+  const [p, m, c, fp, s, n] = await Promise.all([
     supabaseClient.from("profiles").select("*").eq("id", user.id).single(),
     supabaseClient.from("movies").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
     supabaseClient.from("characters").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
+    supabaseClient.from("favorite_people").select("*").eq("user_id",user.id).order("created_at",{ascending:false}),
     supabaseClient.from("library_shares").select(
       "id,created_at,expires_at,sender_id,receiver_id"
     ).or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order("created_at",{ascending:false}),
@@ -189,6 +195,7 @@ async function loadData() {
   if (p.error) throw p.error;
   if (m.error) throw m.error;
   if (c.error) throw c.error;
+  if (fp.error) throw fp.error;
   if (s.error) throw s.error;
   if (n.error) throw n.error;
 
@@ -211,6 +218,7 @@ async function loadData() {
   profile = p.data;
   movies = (m.data || []).map(normalizeMovie);
   characters = c.data || [];
+  favoritePeople = fp.data || [];
   incomingShares = shares
     .filter(share => share.receiver_id === user.id)
     .map(share=>({...share,sender:{username:usernames.get(share.sender_id)||"user"}}));
@@ -233,6 +241,26 @@ async function saveMovie(m, status) {
 
   const normalized = normalizeMovie(data);
   movies = [normalized, ...movies.filter(x => String(x.tmdbId) !== String(normalized.tmdbId))];
+}
+
+async function saveFavoritePerson(person) {
+  const {data,error}=await supabaseClient.from("favorite_people").upsert({
+    user_id:currentUser.id,
+    tmdb_id:Number(person.id),
+    name:person.name,
+    department:person.known_for_department||person.knownForDepartment||person.department||"",
+    profile_path:person.profile_path||person.profilePath||null
+  },{onConflict:"user_id,tmdb_id"}).select().single();
+  if (error) throw error;
+  favoritePeople=[data,...favoritePeople.filter(item=>String(item.tmdb_id)!==String(data.tmdb_id))];
+  return data;
+}
+
+async function removeFavoritePerson(personId) {
+  const {error}=await supabaseClient.from("favorite_people").delete()
+    .eq("user_id",currentUser.id).eq("tmdb_id",Number(personId));
+  if (error) throw error;
+  favoritePeople=favoritePeople.filter(person=>String(person.tmdb_id)!==String(personId));
 }
 
 async function updateMovie(m, patch) {
@@ -698,6 +726,41 @@ async function show(tab, q = "", options = {}) {
         <p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>
       </div>
     </section>
+    <section class="archiveFavoritePeople" aria-labelledby="favoritePeopleTitle">
+      <div class="archiveRecommendationsHead">
+        <div><span>THE CREATIVES BEHIND YOUR FAVORITES</span><h2 id="favoritePeopleTitle">Favorite people.</h2><p>Actors, directors, musicians, writers, and more—follow the people whose work you love.</p></div>
+        <button type="button" class="favoritePersonAddButton" id="addFavoritePerson">＋ ADD A PERSON</button>
+      </div>
+      <div class="favoritePeopleGrid" id="favoritePeopleGrid">
+        ${favoritePeople.length?favoritePeople.map(person=>`
+          <article class="favoritePersonCard">
+            <button type="button" class="favoritePersonOpen" data-person-id="${esc(person.tmdb_id)}">
+              ${person.profile_path
+                ? `<img src="${esc(creditImage(person.profile_path))}" alt="" loading="lazy">`
+                : `<span class="favoritePersonPortraitFallback">${esc((person.name||"?").slice(0,1).toUpperCase())}</span>`}
+              <span><b>${esc(person.name)}</b><small>${esc(person.department||"FILM & TELEVISION")}</small></span>
+            </button>
+            <button type="button" class="favoritePersonRemove" data-person-id="${esc(person.tmdb_id)}" aria-label="Remove ${esc(person.name)} from favorite people" title="Remove from favorites">×</button>
+          </article>`).join(""):`
+            <div class="favoritePeopleEmpty">
+              <p>Keep the storytellers you love close. Add an actor, director, musician, or other creative to get recommendations from their work.</p>
+              <button type="button" class="favoritePersonAddButton" data-add-favorite-person>FIND A PERSON <span>↗</span></button>
+            </div>`}
+      </div>
+    </section>
+    ${favoritePeople.length?`
+      <section class="archivePeopleRecommendations" aria-labelledby="peopleRecommendationsTitle">
+        <div class="archiveRecommendationsHead">
+          <div><span>MORE FROM THE CREATIVES YOU FOLLOW</span><h2 id="peopleRecommendationsTitle">Stories from your favorite people.</h2><p>Recommendations drawn from their acting, directing, music, writing, and crew credits.</p></div>
+          <div class="archiveRailControls">
+            <button type="button" data-people-recommendation-scroll="-1" aria-label="Scroll favorite people recommendations left">‹</button>
+            <button type="button" data-people-recommendation-scroll="1" aria-label="Scroll favorite people recommendations right">›</button>
+          </div>
+        </div>
+        <div class="archiveRecommendationRail favoritePeopleRecommendationRail" id="favoritePeopleRecommendationRail" aria-live="polite">
+          <p class="archiveRecommendationStatus">Finding titles from your favorite people…</p>
+        </div>
+      </section>`:""}
     <section class="archiveDecades" aria-label="Filter library titles by decade">
       <div><span>YOUR LIBRARY, BY ERA</span><p>Every decade has a different feeling.</p></div>
       <div class="archiveDecadeList">
@@ -747,7 +810,35 @@ async function show(tab, q = "", options = {}) {
       });
     });
   });
+  document.querySelectorAll("[data-people-recommendation-scroll]").forEach(button=>{
+    button.addEventListener("click",()=>{
+      $("#favoritePeopleRecommendationRail")?.scrollBy({
+        left:Number(button.dataset.peopleRecommendationScroll)*Math.max(250,$("#favoritePeopleRecommendationRail").clientWidth*.8),
+        behavior:"smooth"
+      });
+    });
+  });
+  $("#addFavoritePerson")?.addEventListener("click",favoritePersonSearchModal);
+  document.querySelectorAll("[data-add-favorite-person]").forEach(button=>
+    button.addEventListener("click",favoritePersonSearchModal)
+  );
+  document.querySelectorAll(".favoritePersonOpen").forEach(button=>
+    button.addEventListener("click",()=>openPerson(button.dataset.personId))
+  );
+  document.querySelectorAll(".favoritePersonRemove").forEach(button=>{
+    button.addEventListener("click",async()=>{
+      button.disabled=true;
+      try {
+        await removeFavoritePerson(button.dataset.personId);
+        show("archive",searchQuery,{history:false});
+      } catch(error) {
+        button.disabled=false;
+        alert(error.message||"Could not remove this favorite person.");
+      }
+    });
+  });
   loadArchiveRecommendations([...allWatched,...allWant]);
+  if (favoritePeople.length) loadFavoritePeopleRecommendations();
   document.querySelectorAll(".archiveDecade").forEach(button=>{
     button.addEventListener("click",()=>{
       archiveDecadeFilter=button.dataset.decade||"";
@@ -858,6 +949,101 @@ async function loadArchiveRecommendations(libraryMovies) {
   rail.querySelectorAll(".archiveRecommendationExpand").forEach(button=>{
     button.addEventListener("click",()=>toggleSimilarRecommendations(button));
   });
+}
+
+async function loadFavoritePeopleRecommendations() {
+  const rail=$("#favoritePeopleRecommendationRail");
+  const request=++favoritePeopleRecommendationRequest;
+  if (!rail) return;
+  if (!tmdbReady()) {
+    rail.innerHTML='<p class="archiveRecommendationStatus">Add a TMDB API key in Settings to get recommendations from your favorite people.</p>';
+    return;
+  }
+  rail.innerHTML='<p class="archiveRecommendationStatus">Finding titles from your favorite people…</p>';
+  const ranked=new Map();
+  const errors=[];
+  for (let offset=0;offset<favoritePeople.length;offset+=4) {
+    const batch=favoritePeople.slice(offset,offset+4);
+    const results=await Promise.allSettled(batch.map(async person=>{
+      const response=await fetch(`/api/person?id=${encodeURIComponent(person.tmdb_id)}`,{headers:tmdbHeaders()});
+      const body=await readApiJson(response,"Favorite person details API");
+      if (!response.ok) throw new Error(body.error||`Could not load credits for ${person.name}.`);
+      return {person,credits:body.filmography||[]};
+    }));
+    if (request!==favoritePeopleRecommendationRequest||!$("#favoritePeopleRecommendationRail")) return;
+    results.forEach(result=>{
+      if (result.status==="rejected") {
+        errors.push(result.reason?.message||"Could not load a favorite person's credits.");
+        return;
+      }
+      result.value.credits.forEach((credit,index)=>{
+        if (!credit.id||!credit.mediaType) return;
+        const type=credit.mediaType==="tv"?"series":"movie";
+        const key=`${type}:${credit.id}`;
+        const recommendation=ranked.get(key)||{
+          id:credit.id,
+          type,
+          title:credit.title||"Untitled",
+          posterPath:credit.posterPath||"",
+          year:credit.year||"",
+          roles:[],
+          matchedPeople:[],
+          score:0
+        };
+        recommendation.score+=Math.max(1,48-index);
+        if (!recommendation.matchedPeople.some(item=>String(item.id)===String(result.value.person.tmdb_id))) {
+          recommendation.matchedPeople.push({
+            id:result.value.person.tmdb_id,
+            name:result.value.person.name,
+            department:result.value.person.department||""
+          });
+        }
+        recommendation.roles=[...new Set([...recommendation.roles,...(credit.roles||[])])];
+        ranked.set(key,recommendation);
+      });
+    });
+  }
+  const recommendations=[...ranked.values()]
+    .filter(item=>!movies.some(movie=>String(movie.tmdbId)===String(item.id)))
+    .sort((a,b)=>b.matchedPeople.length-a.matchedPeople.length||b.score-a.score||a.title.localeCompare(b.title))
+    .slice(0,18);
+  if (!recommendations.length) {
+    rail.innerHTML=errors.length
+      ? `<p class="archiveRecommendationStatus">Could not load favorite-person recommendations: ${esc(errors.join(" "))}</p>`
+      : '<p class="archiveRecommendationStatus">No new titles from these people yet. Add another favorite or check your library for their work.</p>';
+    return;
+  }
+  rail.innerHTML=recommendations.map(recommendation=>`
+    <article class="archiveRecommendationCard favoritePersonRecommendationCard" data-recommendation-item>
+      <button type="button" class="archiveRecommendationPoster archiveRecommendationOpen" aria-label="Open details for ${esc(recommendation.title)}">
+        <img src="${esc(img(recommendation.posterPath))}" alt="" loading="lazy">
+        <span>${recommendation.type==="series"?"SERIES":"FILM"}${recommendation.year?` · ${esc(recommendation.year)}`:""}</span>
+      </button>
+      <div class="archiveRecommendationInfo">
+        <button type="button" class="archiveRecommendationTitle archiveRecommendationOpen">${esc(recommendation.title)}</button>
+        <small>WITH ${esc(recommendation.matchedPeople.map(person=>person.name).join(" · "))}</small>
+        ${recommendation.roles.length?`<small>${esc(recommendation.roles.slice(0,2).join(" · "))}</small>`:""}
+        <button type="button" class="archiveRecommendationExpand" aria-expanded="false">MORE LIKE THIS <span>＋</span></button>
+        <div class="archiveRecommendationActions">
+          <button type="button" class="archiveRecommendationAdd" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}" data-status="want">＋ WATCHLIST</button>
+          <button type="button" class="archiveRecommendationAdd archiveRecommendationCollect" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}" data-status="watched">＋ COLLECTION</button>
+        </div>
+      </div>
+      <div class="archiveRecommendationExpansion" hidden>
+        <p>Featuring ${esc(recommendation.matchedPeople.map(person=>person.name).join(" and "))}${recommendation.roles.length?` · ${esc(recommendation.roles.slice(0,2).join(", "))}`:""}.</p>
+        <span class="archiveSimilarHeading">SIMILAR PICKS</span>
+        <div class="archiveSimilarRail"><p class="archiveRecommendationStatus">Open to find similar films and series…</p></div>
+      </div>
+    </article>`).join("")+(errors.length?`<p class="archiveRecommendationError">${esc(errors.join(" "))}</p>`:"");
+  rail.querySelectorAll(".archiveRecommendationAdd").forEach(button=>
+    button.addEventListener("click",()=>addRecommendedTitle(button,button.dataset.status))
+  );
+  rail.querySelectorAll(".archiveRecommendationOpen").forEach(button=>
+    button.addEventListener("click",()=>openRecommendedTitle(button.closest(".archiveRecommendationCard")))
+  );
+  rail.querySelectorAll(".archiveRecommendationExpand").forEach(button=>
+    button.addEventListener("click",()=>toggleSimilarRecommendations(button))
+  );
 }
 
 async function openRecommendedTitle(card) {
@@ -1666,6 +1852,9 @@ async function renderPerson(id) {
               ${person.placeOfBirth?`<span>${esc(person.placeOfBirth)}</span>`:""}
             </div>
             <a class="personImdb" href="${imdbUrl}" target="_blank" rel="noopener">${person.imdbId?"Open IMDb profile ↗":"Search IMDb ↗"}</a>
+            <button type="button" class="favoritePersonProfileToggle ${favoritePeople.some(saved=>String(saved.tmdb_id)===String(person.id))?"isFavorite":""}" id="favoritePersonProfileToggle" aria-pressed="${favoritePeople.some(saved=>String(saved.tmdb_id)===String(person.id))}">
+              ${favoritePeople.some(saved=>String(saved.tmdb_id)===String(person.id))?"✓ IN FAVORITE PEOPLE":"＋ ADD TO FAVORITE PEOPLE"}
+            </button>
             ${person.biography?`<p class="personBio">${esc(person.biography)}</p>`:"<p class=\"personEmpty\">No biography is available from TMDB.</p>"}
           </div>
         </section>
@@ -1682,6 +1871,33 @@ async function renderPerson(id) {
           : '<p class="personEmpty">No filmography is available from TMDB.</p>'}
       </section>`;
     $("#personBack").onclick=closeAppDetail;
+    $("#favoritePersonProfileToggle").onclick=async event=>{
+      const button=event.currentTarget;
+      const alreadySaved=favoritePeople.some(saved=>String(saved.tmdb_id)===String(person.id));
+      button.disabled=true;
+      try {
+        if (alreadySaved) {
+          await removeFavoritePerson(person.id);
+          button.classList.remove("isFavorite");
+          button.textContent="＋ ADD TO FAVORITE PEOPLE";
+          button.setAttribute("aria-pressed","false");
+        } else {
+          await saveFavoritePerson({
+            id:person.id,
+            name:person.name,
+            knownForDepartment:person.knownForDepartment,
+            profilePath:person.profilePath
+          });
+          button.classList.add("isFavorite");
+          button.textContent="✓ IN FAVORITE PEOPLE";
+          button.setAttribute("aria-pressed","true");
+        }
+      } catch(error) {
+        alert(error.message||"Could not update favorite people.");
+      } finally {
+        button.disabled=false;
+      }
+    };
     document.querySelectorAll(".copyPersonName").forEach(button=>{
       button.onclick=()=>copyPersonName(button);
     });
@@ -2201,6 +2417,85 @@ function authModal(message="") {
       }
     };
   });
+}
+
+function favoritePersonSearchModal() {
+  if (!tmdbReady()) return settingsModal();
+  $("#modal")?.remove();
+  document.body.insertAdjacentHTML("beforeend",`
+    <div class="modal" id="modal">
+      <div class="box favoritePersonSearchBox">
+        <button type="button" class="x" aria-label="Close">×</button>
+        <span>YOUR CREATIVE NORTH STAR</span>
+        <h2>Add a favorite person.</h2>
+        <p>Find an actor, director, musician, writer, or another creative to follow.</p>
+        <div class="live">⌕<input id="favoritePersonQuery" type="search" autocomplete="off" placeholder="Search a person’s name"></div>
+        <div class="favoritePersonSearchResults" id="favoritePersonSearchResults" aria-live="polite">
+          <p class="muted">Search TMDB for a person to add.</p>
+        </div>
+      </div>
+    </div>`);
+  const modal=$("#modal");
+  const input=$("#favoritePersonQuery");
+  const results=$("#favoritePersonSearchResults");
+  modal.querySelector(".x").addEventListener("click",()=>modal.remove());
+  input.addEventListener("input",()=>{
+    clearTimeout(favoritePersonSearchTimer);
+    const query=input.value.trim();
+    const request=++favoritePersonSearchRequest;
+    if (query.length<2) {
+      results.innerHTML='<p class="muted">Enter at least two letters to search.</p>';
+      return;
+    }
+    results.innerHTML='<p class="muted">Searching people…</p>';
+    favoritePersonSearchTimer=setTimeout(()=>searchFavoritePeople(query,request),250);
+  });
+  input.focus();
+}
+
+async function searchFavoritePeople(query,request) {
+  const results=$("#favoritePersonSearchResults");
+  if (!results) return;
+  try {
+    const response=await fetch(`/api/people-search?query=${encodeURIComponent(query)}`,{headers:tmdbHeaders()});
+    const body=await readApiJson(response,"TMDB people search API");
+    if (!response.ok) throw new Error(body.error||"Could not search TMDB people.");
+    if (request!==favoritePersonSearchRequest||$("#favoritePersonQuery")?.value.trim()!==query) return;
+    const people=(body.results||[]).filter(person=>person.id&&person.name).slice(0,16);
+    results.innerHTML=people.length?people.map(person=>{
+      const alreadySaved=favoritePeople.some(saved=>String(saved.tmdb_id)===String(person.id));
+      return `<button type="button" class="favoritePersonSearchResult" data-person-id="${esc(person.id)}" ${alreadySaved?"disabled":""}>
+        ${person.profile_path
+          ? `<img src="${esc(creditImage(person.profile_path))}" alt="" loading="lazy">`
+          : `<span class="favoritePersonPortraitFallback">${esc((person.name||"?").slice(0,1).toUpperCase())}</span>`}
+        <span><b>${esc(person.name)}</b><small>${esc(person.known_for_department||"FILM & TELEVISION")}</small></span>
+        <i>${alreadySaved?"ADDED":"＋ ADD"}</i>
+      </button>`;
+    }).join(""):'<p class="muted">No people found. Try another name.</p>';
+    results.querySelectorAll(".favoritePersonSearchResult:not(:disabled)").forEach(button=>{
+      button.addEventListener("click",()=>addFavoritePersonFromSearch(button,people));
+    });
+  } catch(error) {
+    if (request!==favoritePersonSearchRequest) return;
+    console.error("Could not search for favorite people.",error);
+    results.innerHTML=`<p class="favoritePeopleError">${esc(error.message||"Could not search TMDB people.")}</p>`;
+  }
+}
+
+async function addFavoritePersonFromSearch(button,people) {
+  const person=people.find(item=>String(item.id)===button.dataset.personId);
+  if (!person||button.disabled) return;
+  button.disabled=true;
+  try {
+    await saveFavoritePerson(person);
+    const query=$("#favoritePersonQuery")?.value.trim()||"";
+    const request=++favoritePersonSearchRequest;
+    show("archive",searchQuery,{history:false});
+    if (query.length>=2) await searchFavoritePeople(query,request);
+  } catch(error) {
+    button.disabled=false;
+    alert(error.message||"Could not add this favorite person.");
+  }
 }
 
 async function addModal() {

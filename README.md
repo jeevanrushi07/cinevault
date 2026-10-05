@@ -17,6 +17,8 @@ Supabase Auth internally requires an email-style identifier, so the server creat
 
 For a new database, also run `supabase/social_features.sql` in Supabase SQL Editor after `schema.sql`. For an existing database, run `supabase/library_sharing.sql` if library sharing is not already installed, then run `supabase/social_features.sql`. This adds network chat and notifications for messages and library-sharing changes. Existing per-movie shares are not converted automatically.
 
+For an existing database, also run `supabase/favorite_people.sql` to enable favorite people and person-based recommendations. New databases get this table and its Row Level Security policies from `schema.sql`.
+
 ## Vercel environment variables
 
 Set these in Vercel Project Settings -> Environment Variables:
@@ -43,6 +45,7 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - Unique usernames
 - Separate movie libraries per user
 - Watched / want-to-watch states
+- Favorite actors, directors, musicians, and other creatives, with recommendations based on their filmographies
 - TMDB live search with separate bordered result boxes for titles and people in the same results panel; title results open full detail cards, and people results open person pages with filmographies
 - TMDB title search by director/cast/crew, genre, keyword, and release year (including title + year queries)
 - Top-bar search filters your archive, separates already-saved titles, and finds titles to add as watched or want-to-watch
