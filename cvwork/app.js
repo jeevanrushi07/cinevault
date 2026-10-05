@@ -1,9 +1,23 @@
 const $ = (s) => document.querySelector(s);
-const img = (p) => p ? `https://image.tmdb.org/t/p/w780${p}` : 'https://placehold.co/500x750/111118/eee?text=No+Poster';
-const backdrop = (p) => p ? `https://image.tmdb.org/t/p/w1280${p}` : '';
-const esc = (s='') => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 
-let supabase = null;
+const img = (p) =>
+  p
+    ? `https://image.tmdb.org/t/p/w780${p}`
+    : `https://placehold.co/500x750/111118/eee?text=No+Poster`;
+
+const backdrop = (p) =>
+  p ? `https://image.tmdb.org/t/p/w1280${p}` : '';
+
+const esc = (s = '') =>
+  String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }[c]));
+
+let supabaseClient = null;
 let config = null;
 let currentUser = null;
 let profile = null;
