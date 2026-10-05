@@ -263,6 +263,17 @@ function shell() {
   $("#logout").onclick = $("#logoutTop").onclick = logout;
   $("#notificationBell").onclick=toggleNotifications;
   document.onkeydown=e=>{
+    if (e.key==="Escape") {
+      e.preventDefault();
+      $("#stage")?.remove();
+      document.querySelectorAll(".modal").forEach(modal=>modal.remove());
+      $("#notificationPanel")?.classList.remove("open");
+      $("#searchResults")?.classList.remove("open");
+      $("#search").value="";
+      searchQuery="";
+      show("archive");
+      return;
+    }
     if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k") {
       e.preventDefault();
       $("#search")?.focus();
@@ -357,6 +368,22 @@ async function show(tab, q = "") {
     p.onclick = () => stage(movies.find(m => String(m.tmdbId) === p.dataset.id));
     p.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", p.dataset.id));
   });
+  const watchTarget=document.querySelector(".vertical-watch");
+  if (watchTarget) {
+    watchTarget.ondragenter=e=>{
+      e.preventDefault();
+      watchTarget.classList.add("dragOver");
+    };
+    watchTarget.ondragover=e=>{
+      e.preventDefault();
+      watchTarget.classList.add("dragOver");
+    };
+    watchTarget.ondragleave=e=>{
+      if (e.relatedTarget instanceof Node&&watchTarget.contains(e.relatedTarget)) return;
+      watchTarget.classList.remove("dragOver");
+    };
+    watchTarget.ondrop=dropWatch;
+  }
 }
 
 function updateNotificationBadge() {
@@ -723,19 +750,18 @@ window.dropWatch = async e => {
       if (!m) return;
       await updateMovie(m,{status:"want"});
     }
+    dropTarget.classList.add("dropComplete");
+    await new Promise(resolve=>setTimeout(resolve,260));
     if (sharedPayload && activeTab==="sharedLibrary" && activeSharedShareId) {
-      dropTarget.classList.add("dropComplete");
-      await new Promise(resolve=>setTimeout(resolve,260));
       await renderSharedLibrary(activeSharedShareId);
     } else {
-      show("archive");
+      await show("archive");
     }
   } catch(err) {
     alert(err.message);
   } finally {
     dropTarget.classList.remove("dragOver");
-    dropTarget.classList.add("dropComplete");
-    setTimeout(()=>dropTarget.classList.remove("dropComplete"),300);
+    dropTarget.classList.remove("dropComplete");
   }
 };
 
