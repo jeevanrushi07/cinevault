@@ -57,8 +57,8 @@ let archiveSearchScrollHandler = null;
 let archiveSearchCompressed = false;
 let archiveDecadeFilter = "";
 let archiveRecommendationRequest = 0;
-let headerSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[],people:[],activeTab:"titles"};
-let addSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[],people:[],activeTab:"titles"};
+let headerSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[],people:[]};
+let addSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[],people:[]};
 const googleSearchStates={
   header:{query:"",request:0,loading:false,loaded:false,items:[],error:""},
   add:{query:"",request:0,loading:false,loaded:false,items:[],error:""}
@@ -2233,7 +2233,7 @@ async function addModal() {
   };
   $("#results").onscroll=()=>{
     const panel=$("#results");
-    if (!panel||addSearchState.activeTab==="people"||panel.scrollHeight-panel.scrollTop-panel.clientHeight>120) return;
+    if (!panel||panel.scrollHeight-panel.scrollTop-panel.clientHeight>120) return;
     searchTitles(input.value);
   };
 }
@@ -2242,12 +2242,12 @@ async function searchTitles(q) {
   const results=$("#tmdbSearchResults");
   if (!results) return;
   if (q.trim().length<2) {
-    addSearchState={query:"",page:0,totalPages:1,loading:false,request:addSearchState.request+1,items:[],people:[],activeTab:"titles"};
+    addSearchState={query:"",page:0,totalPages:1,loading:false,request:addSearchState.request+1,items:[],people:[]};
     results.innerHTML="";
     return;
   }
   if (addSearchState.query!==q.trim()) {
-    addSearchState={query:q.trim(),page:0,totalPages:1,loading:false,request:addSearchState.request+1,items:[],people:[],activeTab:"titles"};
+    addSearchState={query:q.trim(),page:0,totalPages:1,loading:false,request:addSearchState.request+1,items:[],people:[]};
   }
   await loadAddSearchPage();
 }
@@ -2420,8 +2420,7 @@ function appendUniqueTitles(existing,incoming) {
   })];
 }
 
-function searchTabsMarkup(state,context,titleContent) {
-  const titleActive=state.activeTab!=="people";
+function searchResultGroupsMarkup(state,titleContent) {
   const peopleContent=state.people.length
     ? state.people.map(person=>`
       <button type="button" class="searchPersonResult" data-person-id="${esc(person.id)}">
@@ -2434,33 +2433,18 @@ function searchTabsMarkup(state,context,titleContent) {
       </button>`).join("")
     : '<p class="muted searchStatus">No related people found.</p>';
   return `
-    <div class="searchResultTabs" role="tablist" aria-label="Search result type">
-      <button type="button" role="tab" data-search-scope="${context}" data-search-tab="titles" aria-selected="${titleActive}">TITLES <span>${state.items.length}</span></button>
-      <button type="button" role="tab" data-search-scope="${context}" data-search-tab="people" aria-selected="${!titleActive}">PEOPLE <span>${state.people.length}</span></button>
-    </div>
-    <section class="searchResultPanel" role="tabpanel" data-search-panel="titles" ${titleActive?"":"hidden"}>
+    <section class="searchResultBox searchTitlesBox" aria-label="Movie and series results">
+      <h3 class="searchResultBoxTitle">TITLES <span>${state.items.length}</span></h3>
       ${titleContent}
       ${state.page<state.totalPages?'<p class="muted searchStatus searchPageStatus">Scroll for more titles</p>':'<p class="muted searchStatus searchPageStatus">End of results</p>'}
     </section>
-    <section class="searchResultPanel" role="tabpanel" data-search-panel="people" ${titleActive?"hidden":""}>
+    <section class="searchResultBox searchPeopleBox" aria-label="Related people">
+      <h3 class="searchResultBoxTitle">PEOPLE <span>${state.people.length}</span></h3>
       ${peopleContent}
     </section>`;
 }
 
 function bindSearchResultActions(container) {
-  container.querySelectorAll("[data-search-tab]").forEach(tab=>{
-    tab.addEventListener("click",()=>{
-      const state=tab.dataset.searchScope==="header"?headerSearchState:addSearchState;
-      state.activeTab=tab.dataset.searchTab==="people"?"people":"titles";
-      const active=state.activeTab;
-      container.querySelectorAll("[data-search-tab]").forEach(button=>
-        button.setAttribute("aria-selected",String(button.dataset.searchTab===active))
-      );
-      container.querySelectorAll("[data-search-panel]").forEach(panel=>{
-        panel.hidden=panel.dataset.searchPanel!==active;
-      });
-    });
-  });
   container.querySelectorAll(".searchMovieResult").forEach(card=>{
     card.addEventListener("click",event=>{
       if (event.target instanceof Element&&event.target.closest("button")) return;
@@ -2530,10 +2514,17 @@ async function loadAddSearchPage() {
 function renderAddSearchResults() {
   const results=$("#tmdbSearchResults");
   if (!results) return;
+  const saved=addSearchState.items.filter(item=>movies.some(movie=>String(movie.tmdbId)===String(item.id)));
+  const unsaved=addSearchState.items.filter(item=>!movies.some(movie=>String(movie.tmdbId)===String(item.id)));
   const titleResults=addSearchState.items.length
-    ? addSearchState.items.map(item=>titleResultMarkup(item)).join("")
+    ? `${saved.length
+        ? `<section class="searchTray alreadySavedTray"><p class="searchStatus">ALREADY IN YOUR LIBRARY</p>${saved.map(item=>titleResultMarkup(item)).join("")}</section>`
+        : ""}
+      ${unsaved.length
+        ? `<section class="searchTray addTitlesTray"><p class="searchStatus">ADD TO YOUR LIBRARY</p>${unsaved.map(item=>titleResultMarkup(item)).join("")}</section>`
+        : ""}`
     : '<p class="muted">No matching titles.</p>';
-  results.innerHTML=searchTabsMarkup(addSearchState,"add",titleResults);
+  results.innerHTML=searchResultGroupsMarkup(addSearchState,titleResults);
   bindSearchResultActions(results);
   const panel=$("#results");
   if (addSearchState.page<addSearchState.totalPages&&panel&&panel.scrollHeight<=panel.clientHeight+8) {
@@ -2579,7 +2570,7 @@ async function searchHeaderTitles(query) {
   if (!results) return;
 
   if (query.trim().length<2) {
-    headerSearchState={query:"",page:0,totalPages:1,loading:false,request:headerSearchState.request+1,items:[],people:[],activeTab:"titles"};
+    headerSearchState={query:"",page:0,totalPages:1,loading:false,request:headerSearchState.request+1,items:[],people:[]};
     if (googleSearchEnabled) searchGoogleTitles(query,"header");
     results.innerHTML="";
     results.classList.remove("open");
@@ -2588,7 +2579,7 @@ async function searchHeaderTitles(query) {
 
   const normalizedQuery=query.trim();
   const request=++headerSearchRequest;
-  headerSearchState={query:normalizedQuery,page:0,totalPages:1,loading:false,request,items:[],people:[],activeTab:"titles"};
+  headerSearchState={query:normalizedQuery,page:0,totalPages:1,loading:false,request,items:[],people:[]};
   if (googleSearchEnabled) searchGoogleTitles(normalizedQuery,"header");
   results.innerHTML=`${googleSearchEnabled?'<section class="googleSearchTray"><span>GOOGLE SEARCH</span><div id="headerGoogleSearchResults"><p class="muted searchStatus">Searching Google in parallel…</p></div></section>':""}<section class="searchTray" id="headerTmdbSearchResults"><p class="muted searchStatus">Searching TMDB…</p></section>`;
   results.classList.add("open");
@@ -2610,7 +2601,7 @@ async function searchHeaderTitles(query) {
 
 async function loadHeaderSearchPage() {
   const state=headerSearchState;
-  if (state.loading||state.activeTab==="people"||state.page>=state.totalPages||state.query!==$("#search")?.value.trim()) return;
+  if (state.loading||state.page>=state.totalPages||state.query!==$("#search")?.value.trim()) return;
   const results=$("#searchResults");
   if (!results) return;
   state.loading=true;
@@ -2647,10 +2638,10 @@ function renderHeaderSearchResults() {
         ? `<section class="searchTray addTitlesTray"><p class="searchStatus">ADD TO YOUR LIBRARY</p>${toAdd.map(item=>titleResultMarkup(item,true)).join("")}</section>`
         : ""}`
     : '<p class="muted searchStatus">No matching movies or series.</p>';
-  tmdbResults.innerHTML=searchTabsMarkup(headerSearchState,"header",titleContent);
+  tmdbResults.innerHTML=searchResultGroupsMarkup(headerSearchState,titleContent);
   bindSearchResultActions(tmdbResults);
   renderGoogleResults("header");
-  if (headerSearchState.activeTab==="titles"&&headerSearchState.page<headerSearchState.totalPages&&results.scrollHeight<=results.clientHeight+8) {
+  if (headerSearchState.page<headerSearchState.totalPages&&results.scrollHeight<=results.clientHeight+8) {
     setTimeout(()=>loadHeaderSearchPage(),0);
   }
 }
