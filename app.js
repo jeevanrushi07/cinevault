@@ -1889,8 +1889,8 @@ function stage(m,readOnly=false,options={}) {
       ${activeStageSequence.length>1?`
         <button type="button" class="movieNavArrow movieNavPrevious" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" ${movieIndex===0?"disabled":""}>‹</button>
         <button type="button" class="movieNavArrow movieNavNext" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" ${movieIndex===activeStageSequence.length-1?"disabled":""}>›</button>`:""}
+      <button type="button" class="x stageClose" onclick="closeAppDetail()" aria-label="Close movie details">×</button>
       <div class="stagebg" data-read-only="${readOnly}" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(m.backdropPath||m.posterPath)}')">
-        <button type="button" class="x stageClose" onclick="closeAppDetail()" aria-label="Close movie details">×</button>
         <div class="stageListControls" role="group" aria-label="Your movie lists">
           <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
           <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
@@ -1936,7 +1936,7 @@ function stage(m,readOnly=false,options={}) {
       return;
     }
     if (e.target===e.currentTarget||
-      (e.target instanceof Element&&!e.target.closest(".stagebg,.movieNavArrow"))) {
+      (e.target instanceof Element&&!e.target.closest(".stagebg,.movieNavArrow,.stageClose"))) {
       closeAppDetail();
     }
   };
