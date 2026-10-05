@@ -116,11 +116,9 @@ async function loadData() {
     supabaseClient.from("profiles").select("*").eq("id", user.id).single(),
     supabaseClient.from("movies").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
     supabaseClient.from("characters").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
-    supabaseClient.from("library_shares").select(`
-      id,created_at,expires_at,sender_id,receiver_id,
-      sender:profiles!library_shares_sender_id_fkey(username),
-      receiver:profiles!library_shares_receiver_id_fkey(username)
-    `).or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order("created_at",{ascending:false})
+    supabaseClient.from("library_shares").select(
+      "id,created_at,expires_at,sender_id,receiver_id"
+    ).or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order("created_at",{ascending:false})
   ]);
 
   if (p.error) throw p.error;
@@ -128,11 +126,30 @@ async function loadData() {
   if (c.error) throw c.error;
   if (s.error) throw s.error;
 
+  const shares=s.data||[];
+  const participantIds=[...new Set(shares.flatMap(share=>[
+    share.sender_id,share.receiver_id
+  ]))];
+  let shareProfiles=[];
+
+  if (participantIds.length) {
+    const {data,error}=await supabaseClient.from("profiles")
+      .select("id,username")
+      .in("id",participantIds);
+    if (error) throw error;
+    shareProfiles=data||[];
+  }
+
+  const usernames=new Map(shareProfiles.map(person=>[person.id,person.username]));
   profile = p.data;
   movies = (m.data || []).map(normalizeMovie);
   characters = c.data || [];
-  incomingShares = (s.data || []).filter(x => x.receiver_id === user.id);
-  outgoingShares = (s.data || []).filter(x => x.sender_id === user.id);
+  incomingShares = shares
+    .filter(share => share.receiver_id === user.id)
+    .map(share=>({...share,sender:{username:usernames.get(share.sender_id)||"user"}}));
+  outgoingShares = shares
+    .filter(share => share.sender_id === user.id)
+    .map(share=>({...share,receiver:{username:usernames.get(share.receiver_id)||"user"}}));
 }
 
 async function saveMovie(m, status) {
@@ -198,10 +215,11 @@ function shell() {
         <header>
           <div class="search">
             ⌕
-            <input id="search" placeholder="Search movies, actors, directors, genres, years...">
+            <input id="search" autocomplete="off" placeholder="Search your archive or add a movie...">
             <kbd>⌘ K</kbd>
+            <div id="searchResults" class="headerResults"></div>
           </div>
-          <button id="addTop">＋</button>
+          <button id="addTop" aria-label="Add a movie">＋</button>
         </header>
         <div id="content"></div>
       </main>
@@ -213,10 +231,19 @@ function shell() {
   $("#share").onclick = shareLibraryModal;
   $("#profile").onclick = profileModal;
   $("#logout").onclick = logout;
+  let headerSearchTimer;
   $("#search").oninput = e => {
     searchQuery = e.target.value;
     show("archive", searchQuery);
+    clearTimeout(headerSearchTimer);
+    headerSearchTimer=setTimeout(()=>searchHeaderTitles(searchQuery),300);
   };
+  $("#search").onfocus=()=>{
+    if ($("#search").value.trim().length>=2) searchHeaderTitles($("#search").value);
+  };
+  document.addEventListener("click",e=>{
+    if (!e.target.closest(".search")) $("#searchResults").classList.remove("open");
+  });
 }
 
 async function show(tab, q = "") {
@@ -815,36 +842,77 @@ async function searchTitles(q) {
     return;
   }
 
-  const r=await fetch(
-    "/api/search?query="+encodeURIComponent(q),
-    {headers:tmdbHeaders()}
-  ).catch(()=>null);
+  try {
+    const results=await fetchTitles(q);
+    $("#results").innerHTML=results.length
+      ? results.map(x=>titleResultMarkup(x)).join("")
+      : '<p class="muted">No matching titles.</p>';
+  } catch(error) {
+    $("#results").innerHTML=`<p class="muted">${esc(error.message)}</p>`;
+  }
+}
 
-  if (!r || !r.ok) {
-    $("#results").innerHTML='<p class="muted">TMDB is unavailable. Add a TMDB API key in Settings.</p>';
+async function fetchTitles(query) {
+  const response=await fetch(
+    "/api/search?query="+encodeURIComponent(query),
+    {headers:tmdbHeaders()}
+  );
+  const result=await response.json().catch(()=>({}));
+
+  if (!response.ok) {
+    if (response.status===503) {
+      throw new Error("TMDB is not configured. Add TMDB_API_KEY in Vercel or a key in Settings.");
+    }
+    throw new Error(result.error||"Movie search is unavailable right now.");
+  }
+
+  return (result.results||[]).filter(x=>["movie","tv"].includes(x.media_type)).slice(0,8);
+}
+
+function titleResultMarkup(item,compact=false) {
+  const title=item.title||item.name||"Untitled";
+  const searchUrl=`https://www.google.com/search?q=${encodeURIComponent(title)}`;
+  return `
+    <div class="result ${compact?"compactResult":""}">
+      <img src="${img(item.poster_path)}" alt="${esc(title)}">
+      <div>
+        <b><a class="movieSearchLink" href="${searchUrl}" target="_blank" rel="noopener">${esc(title)}</a></b>
+        <small>${(item.release_date||item.first_air_date||"").slice(0,4)} · ${item.media_type==="tv"?"Series":"Movie"}</small>
+        ${compact ? "" : `<p>${esc(item.overview||"")}</p>`}
+        <div class="resultActions">
+          <button class="primary" onclick='choose(${JSON.stringify(item).replace(/'/g,"&#39;")},"watched")'>＋ Watched</button>
+          <button onclick='choose(${JSON.stringify(item).replace(/'/g,"&#39;")},"want")'>＋ Want to watch</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+let headerSearchRequest=0;
+
+async function searchHeaderTitles(query) {
+  const results=$("#searchResults");
+  if (!results) return;
+
+  if (query.trim().length<2) {
+    results.innerHTML="";
+    results.classList.remove("open");
     return;
   }
 
-  const j=await r.json();
+  const request=++headerSearchRequest;
+  results.innerHTML='<p class="muted searchStatus">Searching titles…</p>';
+  results.classList.add("open");
 
-  const html=(j.results||[])
-    .filter(x=>["movie","tv"].includes(x.media_type))
-    .slice(0,8)
-    .map(x=>`
-      <div class="result">
-        <img src="${img(x.poster_path)}" alt="${esc(x.title||x.name)}">
-        <div>
-          <b>${esc(x.title||x.name)}</b>
-          <small>${(x.release_date||x.first_air_date||"").slice(0,4)} · ${x.media_type==="tv"?"Series":"Movie"}</small>
-          <p>${esc(x.overview||"")}</p>
-          <div class="resultActions">
-            <button class="primary" onclick='choose(${JSON.stringify(x).replace(/'/g,"&#39;")},"watched")'>＋ Add to watched</button>
-            <button onclick='choose(${JSON.stringify(x).replace(/'/g,"&#39;")},"want")'>＋ Add to want to watch</button>
-          </div>
-        </div>
-      </div>`).join("");
-
-  $("#results").innerHTML=html || '<p class="muted">No matching titles.</p>';
+  try {
+    const found=await fetchTitles(query);
+    if (request!==headerSearchRequest || $("#search")?.value.trim()!==query.trim()) return;
+    results.innerHTML=found.length
+      ? `<p class="searchStatus">ADD A TITLE · click a title to search the web</p>${found.map(item=>titleResultMarkup(item,true)).join("")}`
+      : '<p class="muted searchStatus">No matching movies or series.</p>';
+  } catch(error) {
+    if (request!==headerSearchRequest) return;
+    results.innerHTML=`<p class="muted searchStatus">${esc(error.message)}</p>`;
+  }
 }
 
 async function choose(r,status="watched") {
@@ -870,6 +938,11 @@ async function choose(r,status="watched") {
 
     await saveMovie(x,status);
     $("#modal")?.remove();
+    if ($("#search")) {
+      $("#search").value="";
+      searchQuery="";
+      $("#searchResults")?.classList.remove("open");
+    }
     await show("archive");
   } catch(e) {
     alert(e.message||"Could not save movie");
@@ -881,6 +954,7 @@ function stage(m,readOnly=false) {
 
   $("#stage")?.remove();
 
+  const movieSearchUrl=`https://www.google.com/search?q=${encodeURIComponent(m.title)}`;
   const imdbUrl=`https://www.google.com/search?q=${encodeURIComponent(m.title+" IMDb")}`;
   const trailerUrl=m.trailerKey
     ? `https://www.youtube.com/watch?v=${m.trailerKey}`
@@ -894,7 +968,7 @@ function stage(m,readOnly=false) {
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
             <span>${(m.type||"movie").toUpperCase()} · ${m.year||""}</span>
-            <h1>${esc(m.title)} <a target="_blank" rel="noopener" href="${imdbUrl}">↗</a></h1>
+            <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a> <a target="_blank" rel="noopener" href="${imdbUrl}">↗</a></h1>
 
             <div class="ratings">
               ${m.imdbId ? "IMDb" : ""}
@@ -1063,24 +1137,32 @@ async function boot() {
     });
   } catch(e) {
     console.error(e);
+    const message=e.message||"Unknown startup error.";
+    const code=e.code||"";
+    const needsLibraryMigration=code==="42P01" || code==="PGRST205"
+      || /library_shares/i.test(message);
+    const missingConfig=/environment variables are missing/i.test(message);
+    const heading=needsLibraryMigration
+      ? "Finish the library-sharing setup."
+      : missingConfig
+        ? "Connect CineVault."
+        : "CineVault could not start.";
+    const guidance=needsLibraryMigration
+      ? "Run <b>supabase/library_sharing.sql</b> in Supabase SQL Editor, then reload the app. This adds the expiring library-sharing table and access function."
+      : missingConfig
+        ? "Add <b>SUPABASE_URL</b> and <b>SUPABASE_PUBLISHABLE_KEY</b> in Vercel, then redeploy. Add <b>TMDB_API_KEY</b> to enable movie search."
+        : "Check the database setup and Vercel deployment, then reload. The specific error above can help identify the missing setup.";
 
     document.body.innerHTML=`
       <div class="auth">
         <div class="authBox">
           <div class="brand">
             <b>CINEVAULT</b>
-            <small>SETUP REQUIRED</small>
+            <small>${needsLibraryMigration?"DATABASE MIGRATION REQUIRED":"SETUP REQUIRED"}</small>
           </div>
-          <h1>Connect CineVault.</h1>
-          <p class="muted">${esc(e.message)}</p>
-          <p class="muted">
-            Add <b>SUPABASE_URL</b>,
-            <b>SUPABASE_PUBLISHABLE_KEY</b>,
-            and <b>TMDB_API_KEY</b>
-            in Vercel, then redeploy.
-            Run <b>supabase/schema.sql</b>
-            once in Supabase SQL Editor.
-          </p>
+          <h1>${heading}</h1>
+          <p class="muted">${esc(message)}${code?` (${esc(code)})`:""}</p>
+          <p class="muted">${guidance}</p>
         </div>
       </div>`;
   }

@@ -41,6 +41,8 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - Separate movie libraries per user
 - Watched / want-to-watch states
 - TMDB live title search
+- Top-bar search filters your archive and finds titles to add as watched or want-to-watch
+- Movie titles open a web search for that title
 - Movie details, cast, director, trailer and metadata
 - Personal movie notes
 - Search across title/cast/director/genre/year
