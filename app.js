@@ -680,13 +680,13 @@ async function addModal() {
 
   document.body.insertAdjacentHTML("beforeend",`
     <div class="modal" id="modal">
-      <div class="box">
+      <div class="box searchBox">
         <button class="x" onclick="$('#modal').remove()">×</button>
         <span>ADD TO CINEVAULT</span>
         <h2>Find a movie or series.</h2>
         <p>Results update while you type. Select the exact match.</p>
         <div class="live">⌕<input id="aq" autofocus placeholder="Interstellar, Dark, Dune..."></div>
-        <div id="results"></div>
+        <div id="results" class="searchResults"></div>
       </div>
     </div>`);
 
