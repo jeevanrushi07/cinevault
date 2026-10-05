@@ -264,6 +264,10 @@ function shell() {
   document.onkeydown=e=>{
     if (e.key==="Escape") {
       e.preventDefault();
+      if ($("#profileImageViewer")) {
+        $("#profileImageViewer").remove();
+        return;
+      }
       $("#stage")?.remove();
       document.querySelectorAll(".modal").forEach(modal=>modal.remove());
       $("#notificationPanel")?.classList.remove("open");
@@ -1565,37 +1569,66 @@ function profileModal() {
   const suggestions=profileImageSuggestions();
   document.body.insertAdjacentHTML("beforeend",`
     <div class="modal" id="profileModal">
-      <div class="box">
+      <div class="box profileBox">
         <button class="x" onclick="this.closest('.modal').remove()">×</button>
         <span>PROFILE</span>
-        <h2>Your archive identity.</h2>
-        <input class="field" id="pn" value="${esc(profile?.display_name||profile?.username||"")}" placeholder="Display name">
-        <div class="profilePhotoSection">
-          <label class="shareExpiryLabel" for="profileAvatarUrl">PROFILE PICTURE · ONLINE IMAGE LINK</label>
-          <div id="avatarDrop" class="avatarDrop">
-            <img id="avatarPreview" src="${esc(avatar)}" alt="Profile picture preview" ${avatar?"":"hidden"}>
-            <span id="avatarDropHint">${avatar?"Current profile picture":"Drop an image from a webpage here"}</span>
+        <div class="profileOverview">
+          <div class="profileAvatarWrap">
+            <button type="button" id="profileImageView" class="profileImageView" aria-label="View profile picture full screen" ${avatar?"":"disabled"}>
+              ${avatar?`<img src="${esc(avatar)}" alt="Profile picture">`:`<span class="profileFallback profileViewFallback" aria-hidden="true">${esc((profile?.username||"U").slice(0,1).toUpperCase())}</span>`}
+            </button>
+            <button type="button" id="editProfile" class="profileEditButton" aria-label="Edit profile and profile picture" title="Edit profile">✎</button>
           </div>
-          <input class="field" id="profileAvatarUrl" type="url" value="${esc(avatar)}" placeholder="Paste an image URL (https://…)" autocomplete="url">
-          <p class="muted profilePhotoHint">Images stay hosted at their original online source; CineVault saves only the image link. To use Google Images, open a search and copy or drag the image itself.</p>
-          <a class="profileImageSearch" href="https://www.google.com/search?tbm=isch&q=${encodeURIComponent((profile?.display_name||profile?.username||"movie character")+" portrait")}" target="_blank" rel="noopener">Search images online ↗</a>
-          ${suggestions.length?`
-            <p class="muted profileSuggestionsLabel">SUGGESTIONS FROM YOUR WATCHED MOVIES AND CHARACTERS</p>
-            <div class="profileSuggestions">
-              ${suggestions.map(item=>`
-                <button type="button" class="profileSuggestion" data-avatar-url="${esc(item.url)}" title="${esc(item.label)}">
-                  <img src="${esc(item.url)}" alt="${esc(item.label)}">
-                </button>`).join("")}
-            </div>`:""}
-          <small id="avatarMessage" class="muted profilePhotoHint"></small>
+          <div class="profileIdentity">
+            <h2>${esc(profile?.display_name||profile?.username||"Your profile")}</h2>
+            <p>@${esc(profile?.username||"user")}</p>
+          </div>
         </div>
-        <button class="primary full" onclick="saveProfile(this)">Save profile</button>
+        <div id="profileEditSection" class="profileEditSection" hidden>
+          <label class="shareExpiryLabel" for="pn">DISPLAY NAME</label>
+          <input class="field profileNameInput" id="pn" value="${esc(profile?.display_name||profile?.username||"")}" placeholder="Display name">
+          <div class="profilePhotoSection">
+            <label class="shareExpiryLabel" for="profileAvatarUrl">PROFILE PICTURE · ONLINE IMAGE LINK</label>
+            <div id="avatarDrop" class="avatarDrop">
+              <img id="avatarPreview" src="${esc(avatar)}" alt="Profile picture preview" ${avatar?"":"hidden"}>
+              <span id="avatarDropHint">${avatar?"Current profile picture":"Drop an image from a webpage here"}</span>
+            </div>
+            <div class="profileAvatarActions">
+              <input class="field" id="profileAvatarUrl" type="url" value="${esc(avatar)}" placeholder="Paste an image URL (https://…)" autocomplete="url">
+              <button type="button" id="removeAvatar" class="danger">Remove picture</button>
+            </div>
+            <p class="muted profilePhotoHint">Images stay hosted at their original online source; CineVault saves only the image link. To use Google Images, open a search and copy or drag the image itself.</p>
+            <a class="profileImageSearch" href="https://www.google.com/search?tbm=isch&q=${encodeURIComponent((profile?.display_name||profile?.username||"movie character")+" portrait")}" target="_blank" rel="noopener">Search images online ↗</a>
+            ${suggestions.length?`
+              <p class="muted profileSuggestionsLabel">SUGGESTIONS FROM YOUR WATCHED MOVIES AND CHARACTERS</p>
+              <div class="profileSuggestions">
+                ${suggestions.map(item=>`
+                  <button type="button" class="profileSuggestion" data-avatar-url="${esc(item.url)}" title="${esc(item.label)}">
+                    <img src="${esc(item.url)}" alt="${esc(item.label)}">
+                  </button>`).join("")}
+              </div>`:""}
+            <small id="avatarMessage" class="muted profilePhotoHint"></small>
+          </div>
+          <button class="primary full" onclick="saveProfile(this)">Save profile</button>
+        </div>
       </div>
     </div>`);
+
+  const imageView=$("#profileImageView");
+  if (avatar) imageView.onclick=()=>showProfileImage(avatar);
+  $("#editProfile").onclick=()=>{
+    const editor=$("#profileEditSection");
+    editor.hidden=false;
+    $("#editProfile").setAttribute("aria-expanded","true");
+    editor.scrollIntoView({behavior:"smooth",block:"nearest"});
+  };
 
   const urlInput=$("#profileAvatarUrl");
   const preview=$("#avatarPreview");
   const drop=$("#avatarDrop");
+  preview.onclick=()=>{
+    if (!preview.hidden&&preview.src) showProfileImage(preview.src);
+  };
   const setAvatar=value=>{
     const url=normalizeImageUrl(value);
     if (!url) {
@@ -1621,6 +1654,13 @@ function profileModal() {
     setAvatar(urlInput.value);
   };
   preview.onerror=()=>$("#avatarMessage").textContent="Could not load that image. Try a direct image link.";
+  $("#removeAvatar").onclick=()=>{
+    urlInput.value="";
+    preview.removeAttribute("src");
+    preview.hidden=true;
+    $("#avatarDropHint").textContent="Drop an image from a webpage here";
+    $("#avatarMessage").textContent="Profile picture will be removed when you save.";
+  };
   document.querySelectorAll(".profileSuggestion").forEach(button=>{
     button.onclick=()=>setAvatar(button.dataset.avatarUrl);
   });
@@ -1646,6 +1686,31 @@ function profileModal() {
     if (!setAvatar(droppedUrl)) {
       $("#avatarMessage").textContent="Drop an online image or image link, or paste its URL. Local files are not uploaded.";
     }
+  };
+}
+
+function showProfileImage(url) {
+  document.body.insertAdjacentHTML("beforeend",`
+    <div id="profileImageViewer" class="profileImageViewer" role="dialog" aria-modal="true" aria-label="Full-size profile picture">
+      <button type="button" class="profileImageClose" aria-label="Close image">×</button>
+      <img class="profileFullImage" src="${esc(url)}" alt="Full-size profile picture">
+      <span class="profileImageDimensions">Loading image dimensions…</span>
+    </div>`);
+  const viewer=$("#profileImageViewer");
+  const image=viewer.querySelector("img");
+  image.onload=()=> {
+    viewer.querySelector(".profileImageDimensions").textContent=`${image.naturalWidth} × ${image.naturalHeight} px`;
+  };
+  image.onerror=()=> {
+    viewer.querySelector(".profileImageDimensions").textContent="Could not load this image.";
+  };
+  if (image.complete) {
+    if (image.naturalWidth) image.onload();
+    else image.onerror();
+  }
+  viewer.querySelector(".profileImageClose").onclick=()=>viewer.remove();
+  viewer.onclick=event=>{
+    if (event.target===viewer) viewer.remove();
   };
 }
 
@@ -1680,6 +1745,7 @@ window.saveProfile=async btn=>{
   btn.closest(".modal").remove();
   shell();
   show(activeTab);
+  profileModal();
 };
 
 async function logout() {
