@@ -39,10 +39,13 @@ let stageTrailerScrollHandler = null;
 let stageTrailerVisibilityHandler = null;
 let stageTrailerWindowBlurHandler = null;
 let stageTrailerWindowFocusHandler = null;
+let stageTrailerKeyboardHandler = null;
 let stageTrailerGeneration = 0;
 let stageTrailerIsIdle = false;
 let stageTrailerPageActive = !document.hidden&&document.hasFocus();
 let stageTrailerContentTimer = null;
+let stageTrailerFeedbackTimer = null;
+let stageTrailerPlaybackRate = 1;
 let stageTrailerVideoId = "";
 let stageTrailerCandidates = [];
 let stageTrailerCandidateIndex = 0;
@@ -1500,7 +1503,6 @@ function renderCredits(movie) {
       ${person.character?`<small>${esc(person.character)}</small>`:""}
     </article>`;
   return `
-    ${renderMovieFacts(movie)}
     <div class="creditSection">
       <span class="creditSectionLabel">PRODUCTION</span>
       ${production.length
@@ -1526,9 +1528,6 @@ function renderCreditsPlaceholder() {
       <span class="creditSkeletonLine short"></span>
     </div>`).join("")}</div>`;
   return `
-    <div class="movieFacts creditSkeletonFacts" aria-hidden="true">
-      <span class="creditSkeletonPill"></span><span class="creditSkeletonPill short"></span>
-    </div>
     <div class="creditSection creditSkeletonSection" aria-hidden="true">
       <span class="creditSectionLabel">PRODUCTION</span>${cards(4,"production")}
     </div>
@@ -1553,6 +1552,8 @@ async function refreshStageCredits(movie) {
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
     currentPanel.innerHTML=renderCredits(details);
+    const factsPanel=$("#stageMovieFacts");
+    if (factsPanel) factsPanel.innerHTML=renderMovieFacts(details);
     const updatedMovie={
       ...movie,
       backdropPaths:details.backdropPaths||[],
@@ -2519,6 +2520,7 @@ function stage(m,readOnly=false,options={}) {
         <div class="stageBackdropLayer" id="stageBackdropB" aria-hidden="true"></div>
         <div class="stageTrailerLayer" id="stageTrailerLayer" aria-hidden="true"><div id="stageTrailerPlayer"></div></div>
         <a class="stageTrailerFallback" id="stageTrailerFallback" target="_blank" rel="noopener" hidden>▶ Open trailer on YouTube</a>
+        <div class="stageTrailerFeedback" id="stageTrailerFeedback" role="status" aria-live="polite" hidden></div>
         <div class="stageListControls" role="group" aria-label="Your movie lists">
           <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
           <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
@@ -2541,7 +2543,10 @@ function stage(m,readOnly=false,options={}) {
               <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
               <button type="button" class="copyMovieTitle" aria-label="Copy movie title" title="Copy movie title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
             </div>
-            ${m.year?`<span class="movieYear">${esc(m.year)}</span>`:""}
+            <div class="stageMovieMeta">
+              ${m.year?`<span class="movieYear">${esc(m.year)}</span>`:""}
+              <div class="stageMovieFacts" id="stageMovieFacts">${renderMovieFacts(m)}</div>
+            </div>
 
             <div class="genres">
               ${(m.genres||[]).map(g=>`<i>${esc(g)}</i>`).join("")}
@@ -2564,6 +2569,7 @@ function stage(m,readOnly=false,options={}) {
               ${readOnly ? "" : `
                 <button class="danger" onclick="deleteMovie('${m.tmdbId}')">Delete</button>`}
             </div>
+            <p class="stageKeyboardHint">TRAILER KEYS · Z BACK 5S · X FORWARD 5S · D SPEED UP · S SLOW DOWN</p>
           </div>
         </div>
         <section class="stageRecommendations" id="stageRecommendations" aria-label="Recommended titles">
@@ -2755,14 +2761,21 @@ function stopStageTrailer() {
     window.removeEventListener("focus",stageTrailerWindowFocusHandler);
     stageTrailerWindowFocusHandler=null;
   }
+  if (stageTrailerKeyboardHandler) {
+    document.removeEventListener("keydown",stageTrailerKeyboardHandler);
+    stageTrailerKeyboardHandler=null;
+  }
   stageTrailerIsIdle=false;
   clearTimeout(stageTrailerContentTimer);
   stageTrailerContentTimer=null;
+  clearTimeout(stageTrailerFeedbackTimer);
+  stageTrailerFeedbackTimer=null;
   stageTrailerVideoId="";
   stageTrailerCandidates=[];
   stageTrailerCandidateIndex=0;
   stageTrailerMovie=null;
   stageTrailerFallbackSearched=false;
+  stageTrailerPlaybackRate=1;
   if (stageTrailerPlayer) {
     stageTrailerPlayer.destroy();
     stageTrailerPlayer=null;
@@ -2786,6 +2799,9 @@ function setupStageTrailer(videoId,movie=activeStageMovie) {
   stageTrailerPointerHandler=()=>{
     stageTrailerActivity();
   };
+  stageTrailerPlaybackRate=1;
+  stageTrailerKeyboardHandler=handleStageTrailerShortcut;
+  document.addEventListener("keydown",stageTrailerKeyboardHandler);
   stageTrailerScrollHandler=()=>stageTrailerActivity();
   document.addEventListener("pointermove",stageTrailerPointerHandler,{passive:true});
   document.addEventListener("scroll",stageTrailerScrollHandler,{capture:true,passive:true});
@@ -2832,6 +2848,8 @@ async function startStageTrailerAfterIdle(generation) {
         events:{
           onReady:event=>{
             applyStageTrailerAudio(event.target);
+            stageTrailerPlaybackRate=1;
+            event.target.setPlaybackRate(1);
             if (stageTrailerIsIdle&&generation===stageTrailerGeneration) event.target.playVideo();
             else event.target.pauseVideo();
           },
@@ -2845,11 +2863,13 @@ async function startStageTrailerAfterIdle(generation) {
                   if (generation===stageTrailerGeneration&&stageTrailerIsIdle&&!trailerReadMode) {
                     $("#stage")?.classList.add("trailerContentHidden");
                   }
-                },10000);
+                },7000);
               }
             }
             if (event.data===YT.PlayerState.ENDED&&stageTrailerIsIdle&&generation===stageTrailerGeneration) {
               event.target.seekTo(0,true);
+              stageTrailerPlaybackRate=1;
+              event.target.setPlaybackRate(1);
               applyStageTrailerAudio(event.target);
               event.target.playVideo();
             }
@@ -2896,6 +2916,8 @@ function tryNextStageTrailer(errorCode,generation=stageTrailerGeneration) {
   }
   stageTrailerCandidateIndex=nextIndex;
   stageTrailerVideoId=stageTrailerCandidates[nextIndex];
+  stageTrailerPlaybackRate=1;
+  stageTrailerPlayer?.setPlaybackRate(1);
   console.warn(`YouTube trailer ${stageTrailerCandidateIndex} failed with error ${errorCode}; trying another available trailer.`);
   applyStageTrailerAudio();
   if (stageTrailerIsIdle) {
@@ -2939,6 +2961,52 @@ function showStageTrailerFallback(message="") {
   fallback.href=`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
   fallback.hidden=false;
   fallback.title=message||"Open trailer search results on YouTube.";
+}
+
+function showStageTrailerFeedback(message) {
+  const feedback=$("#stageTrailerFeedback");
+  if (!feedback) return;
+  clearTimeout(stageTrailerFeedbackTimer);
+  feedback.textContent=message;
+  feedback.hidden=false;
+  stageTrailerFeedbackTimer=setTimeout(()=>{
+    feedback.hidden=true;
+    stageTrailerFeedbackTimer=null;
+  },1400);
+}
+
+function handleStageTrailerShortcut(event) {
+  if (!$("#stage")||!stageTrailerPlayer||event.altKey||event.ctrlKey||event.metaKey) return;
+  if (event.target instanceof Element&&event.target.closest("input,textarea,select,[contenteditable='true']")) return;
+  const key=event.key.toLowerCase();
+  if (!["z","x","d","s"].includes(key)) return;
+  event.preventDefault();
+  if (key==="z"||key==="x") {
+    const current=Number(stageTrailerPlayer.getCurrentTime());
+    const duration=Number(stageTrailerPlayer.getDuration());
+    if (!Number.isFinite(current)||!Number.isFinite(duration)) return;
+    const target=Math.min(duration,Math.max(0,current+(key==="z"?-5:5)));
+    stageTrailerPlayer.seekTo(target,true);
+    showStageTrailerFeedback(`${key==="z"?"−":"+"}${Math.round(Math.abs(target-current))} sec`);
+    return;
+  }
+
+  const current=stageTrailerPlaybackRate||1;
+  const available=stageTrailerPlayer.getAvailablePlaybackRates?.();
+  const rates=[...new Set((Array.isArray(available)&&available.length?available:[0.25,0.5,1,1.5,2])
+    .map(Number).filter(rate=>Number.isFinite(rate)&&rate>0))].sort((a,b)=>a-b);
+  const direction=key==="d"?1:-1;
+  const options=rates.filter(rate=>direction>0?rate>current:rate<current);
+  const nextRate=options.sort((a,b)=>
+    Math.abs(a-(current+direction*.5))-Math.abs(b-(current+direction*.5))
+  )[0];
+  if (!nextRate) {
+    showStageTrailerFeedback(direction>0?"Maximum supported speed":"Minimum supported speed");
+    return;
+  }
+  stageTrailerPlaybackRate=nextRate;
+  stageTrailerPlayer.setPlaybackRate(nextRate);
+  showStageTrailerFeedback(`${nextRate.toFixed(1)}× speed`);
 }
 
 function stageTrailerActivity() {
