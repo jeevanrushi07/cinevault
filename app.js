@@ -316,9 +316,8 @@ async function show(tab, q = "") {
   }
 
   const filtered = q ? movies.filter(m => matches(m,q)) : movies;
-  const watchedIds = new Set(
-    movies.filter(m => m.status === "watched").map(m => String(m.tmdbId))
-  );
+  const watched = filtered.filter(m=>m.status==="watched");
+  const want = filtered.filter(m=>m.status==="want");
 
   c.innerHTML = `
     <section class="hero">
@@ -333,16 +332,16 @@ async function show(tab, q = "") {
       </div>
       <div class="orb">✦<small>LIVE METADATA</small></div>
     </section>
-    ${watchlist()}
+    ${watchlist(want)}
     <div class="head">
       <div>
-        <span>ARCHIVE</span>
-        <h2>${q ? `Results for "${esc(q)}"` : "Your collection"}</h2>
+        <span>WATCHED COLLECTION</span>
+        <h2>${q ? `Watched results for "${esc(q)}"` : "Your collection"}</h2>
       </div>
-      <small>${filtered.length} TITLES</small>
+      <small>${watched.length} TITLES</small>
     </div>
     <div class="wall">
-      ${filtered.map((m,i)=>poster(m,i,watchedIds.has(String(m.tmdbId)) && m.status==="watched")).join("")}
+      ${watched.map((m,i)=>poster(m,i,true)).join("")}
     </div>`;
 
   document.querySelectorAll(".poster").forEach(p => {
@@ -668,8 +667,7 @@ function poster(m,i=0,mutual=false,readOnly=false,existingStatus="") {
     </article>`;
 }
 
-function watchlist() {
-  const ms = movies.filter(m => m.status === "want");
+function watchlist(ms=movies.filter(m => m.status === "want")) {
 
   return `
     <section class="watch vertical-watch"
@@ -682,7 +680,7 @@ function watchlist() {
       </div>
       ${
         ms.length
-        ? ms.slice(0,10).map(m=>`
+        ? ms.map(m=>`
           <article onclick="stageById('${m.tmdbId}')">
             <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
             <b>${esc(m.title)}<small>${esc(m.year)}</small></b>
