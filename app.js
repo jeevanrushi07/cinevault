@@ -3019,6 +3019,10 @@ async function startStageTrailerAfterIdle(generation) {
                 },7000);
               }
             }
+            if (event.data===YT.PlayerState.PAUSED&&generation===stageTrailerGeneration) {
+              clearTimeout(stageTrailerContentTimer);
+              stageTrailerContentTimer=null;
+            }
             if (event.data===YT.PlayerState.ENDED&&stageTrailerIsIdle&&generation===stageTrailerGeneration) {
               event.target.seekTo(0,true);
               stageTrailerPlaybackRate=1;
@@ -3130,7 +3134,24 @@ function showStageTrailerFeedback(message) {
 
 function handleStageTrailerShortcut(event) {
   if (!$("#stage")||!stageTrailerPlayer||event.altKey||event.ctrlKey||event.metaKey) return;
-  if (event.target instanceof Element&&event.target.closest("input,textarea,select,[contenteditable='true']")) return;
+  if (event.target instanceof Element&&event.target.closest("input,textarea,select,button,a,[contenteditable='true']")) return;
+  if (event.code==="Space"||event.key===" ") {
+    event.preventDefault();
+    const playingState=window.YT?.PlayerState?.PLAYING;
+    const playerState=stageTrailerPlayer.getPlayerState();
+    if (playerState===playingState) {
+      stageTrailerPlayer.pauseVideo();
+      showStageTrailerFeedback("Paused");
+    } else if (stageTrailerPageActive&&!document.hidden&&!trailerReadMode) {
+      clearTimeout(stageTrailerIdleTimer);
+      stageTrailerIdleTimer=null;
+      stageTrailerIsIdle=true;
+      applyStageTrailerAudio();
+      stageTrailerPlayer.playVideo();
+      showStageTrailerFeedback("Playing");
+    }
+    return;
+  }
   const key=event.key.toLowerCase();
   if (!["z","x","d","s"].includes(key)) return;
   event.preventDefault();
