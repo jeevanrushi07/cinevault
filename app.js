@@ -29,6 +29,7 @@ let networkUsers = [];
 let activeChatUser = null;
 let chatRefreshTimer = null;
 let notificationRefreshTimer = null;
+let activeStageMovie = null;
 
 function personPageUrl(person) {
   return person?.id?`#person=${encodeURIComponent(person.id)}`:"";
@@ -1705,6 +1706,7 @@ function stage(m,readOnly=false,options={}) {
   if (!m) return;
 
   $("#stage")?.remove();
+  activeStageMovie=m;
   document.title=`${m.title||"Movie"} | CineVault`;
   if (options.history!==false) {
     const current=history.state&&typeof history.state==="object"?history.state:{};
@@ -1724,11 +1726,17 @@ function stage(m,readOnly=false,options={}) {
   const trailerUrl=m.trailerKey
     ? `https://www.youtube.com/watch?v=${m.trailerKey}`
     : `https://www.youtube.com/results?search_query=${encodeURIComponent(m.title+" trailer")}`;
+  const savedMovie=movies.find(movie=>String(movie.tmdbId)===String(m.tmdbId));
+  const listStatus=savedMovie?.status||"";
 
   document.body.insertAdjacentHTML("beforeend",`
     <div class="stage" id="stage" data-movie-id="${esc(m.tmdbId)}">
       <button class="x" onclick="closeAppDetail()">×</button>
-      <div class="stagebg" style="background-image:linear-gradient(90deg,#08080c 20%,rgba(8,8,12,.8),rgba(8,8,12,.15)),url('${backdrop(m.backdropPath)}')">
+      <div class="stagebg" data-read-only="${readOnly}" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(m.backdropPath||m.posterPath)}')">
+        <div class="stageListControls" role="group" aria-label="Your movie lists">
+          <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
+          <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
+        </div>
         <div class="stagebody">
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
@@ -1752,11 +1760,6 @@ function stage(m,readOnly=false,options={}) {
             <div class="actions">
               <a class="primary" target="_blank" rel="noopener" href="${trailerUrl}">▶ Trailer</a>
               ${readOnly ? "" : `
-                ${
-                m.status==="want"
-                ? `<button onclick="markWatched('${m.tmdbId}')">✓ Mark watched</button>`
-                : `<button onclick="want('${m.tmdbId}')">＋ Want to watch</button>`
-                }
                 <button class="danger" onclick="deleteMovie('${m.tmdbId}')">Delete</button>`}
             </div>
           </div>
@@ -1783,6 +1786,25 @@ function stage(m,readOnly=false,options={}) {
     }
   };
 }
+
+window.setStageListStatus=async status=>{
+  const stageMovie=activeStageMovie;
+  if (!stageMovie||!["watched","want"].includes(status)) return;
+  const savedMovie=movies.find(movie=>String(movie.tmdbId)===String(stageMovie.tmdbId));
+  if (savedMovie?.status===status) return;
+
+  try {
+    if (savedMovie) {
+      await updateMovie(savedMovie,{status});
+      stage({...stageMovie,status},document.querySelector("#stage .stagebg")?.dataset.readOnly==="true",{history:false});
+    } else {
+      await saveMovie(stageMovie,status);
+      stage({...stageMovie,status},document.querySelector("#stage .stagebg")?.dataset.readOnly==="true",{history:false});
+    }
+  } catch(error) {
+    alert(error.message||"Could not update movie list.");
+  }
+};
 
 window.markWatched=async id=>{
   const m=movies.find(x=>String(x.tmdbId)===String(id));
