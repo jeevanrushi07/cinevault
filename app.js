@@ -559,35 +559,81 @@ async function show(tab, q = "", options = {}) {
   const filtered = q ? movies.filter(m => matches(m,q)) : movies;
   const watched = filtered.filter(m=>m.status==="watched");
   const want = filtered.filter(m=>m.status==="want");
+  const allWatched=movies.filter(m=>m.status==="watched");
+  const allWant=movies.filter(m=>m.status==="want");
+  const genreCounts=new Map();
+  allWatched.forEach(movie=>{
+    (movie.genres||[]).forEach(genre=>{
+      const name=String(genre||"").trim();
+      if (!name) return;
+      const key=name.toLocaleLowerCase();
+      const current=genreCounts.get(key)||{name,count:0};
+      current.count++;
+      genreCounts.set(key,current);
+    });
+  });
+  const topGenres=[...genreCounts.values()].sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name)).slice(0,3);
+  const featuredMovie=allWatched[0]||null;
+  const archiveName=profile?.username||currentUser?.email?.split("@")[0]||"cinephile";
+  const tasteCopy=topGenres.length
+    ? `Your archive leans toward ${topGenres.map(genre=>genre.name).join(", ")}.`
+    : allWatched.length
+      ? "Your collection is taking shape. Add genres to your titles to reveal your viewing patterns."
+      : "Every great collection starts with one story that stays with you.";
 
   c.innerHTML = `
-    <section class="hero">
-      <div>
-        <span>YOUR WATCHED UNIVERSE</span>
-        <h1>A private archive<br><i>of stories.</i></h1>
-        <p>
-          ${movies.filter(m=>m.status==="watched").length} watched ·
-          ${movies.filter(m=>m.status==="want").length} want to watch.
-          Search works across title, cast, director, genre and year.
-        </p>
+    <section class="archiveHero">
+      <div class="archiveHeroCopy">
+        <span class="archiveEyebrow"><i></i> YOUR ARCHIVE <b>/</b> @${esc(archiveName)}</span>
+        <h1>${allWatched.length?`A taste for<br><em>${esc(topGenres[0]?.name||"stories")}</em>.`:"Your next<br><em>favorite story</em>."}</h1>
+        <p>${esc(tasteCopy)}</p>
+        <div class="archiveMetrics" aria-label="Your library">
+          <div><strong>${allWatched.length}</strong><span>WATCHED</span></div>
+          <div><strong>${allWant.length}</strong><span>ON YOUR LIST</span></div>
+          <div><strong>${genreCounts.size}</strong><span>GENRES EXPLORED</span></div>
+        </div>
+        ${topGenres.length?`
+          <div class="archiveTaste">
+            <span>YOUR SIGNATURE</span>
+            <div>${topGenres.map(genre=>`<span>${esc(genre.name)}<b>${genre.count}</b></span>`).join("")}</div>
+          </div>`:""}
       </div>
-      <div class="orb">✦<small>LIVE METADATA</small></div>
+      ${featuredMovie?`
+        <button type="button" class="archiveFeature" data-id="${esc(featuredMovie.tmdbId)}" aria-label="Open ${esc(featuredMovie.title)}">
+          <img src="${img(featuredMovie.posterPath)}" alt="">
+          <span class="archiveFeatureShade"></span>
+          <span class="archiveFeatureLabel"><i></i> A STORY YOU KEPT</span>
+          <span class="archiveFeatureTitle">${esc(featuredMovie.title)}${featuredMovie.year?` <small>${esc(featuredMovie.year)}</small>`:""}</span>
+          <span class="archiveFeatureAction">OPEN FROM YOUR ARCHIVE <b>↗</b></span>
+        </button>`:`
+        <div class="archiveFeature archiveFeatureEmpty" aria-hidden="true">
+          <span class="archiveFeatureMark">CV</span>
+          <span class="archiveFeatureLabel">A SPACE FOR YOUR STORIES</span>
+          <span class="archiveFeatureAction">BUILT A TITLE AT A TIME</span>
+        </div>`}
     </section>
     ${watchlist(want)}
-    <div class="head">
+    <div class="head archiveCollectionHead">
       <div>
-        <span>WATCHED COLLECTION</span>
+        <span>${q?"SEARCHING YOUR ARCHIVE":"THE STORIES THAT STAYED"}</span>
         <h2>${q ? `Watched results for "${esc(q)}"` : "Your collection"}</h2>
       </div>
-      <small>${watched.length} TITLES</small>
+      <small>${watched.length} ${watched.length===1?"TITLE":"TITLES"}</small>
     </div>
-    <div class="wall">
-      ${watched.map((m,i)=>poster(m,i,true)).join("")}
-    </div>`;
+    ${watched.length?`
+      <div class="wall archiveWall">
+        ${watched.map((m,i)=>poster(m,i,true)).join("")}
+      </div>`:`
+      <div class="archiveEmptyState">
+        <span>${q?"NO MATCHES IN THIS CHAPTER":"YOUR ARCHIVE BEGINS HERE"}</span>
+        <p>${q?"Try a different title, person, year, or genre.":"Save a film or series you love, and it will find its place here."}</p>
+      </div>`}`;
 
-  document.querySelectorAll(".poster").forEach(p => {
+  document.querySelectorAll(".poster,.archiveFeature[data-id]").forEach(p => {
     p.onclick = () => stageFromCard(movies.find(m => String(m.tmdbId) === p.dataset.id),p);
-    p.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", p.dataset.id));
+    if (p.classList.contains("poster")) {
+      p.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", p.dataset.id));
+    }
   });
   const watchTarget=document.querySelector(".vertical-watch");
   if (watchTarget) {
