@@ -47,15 +47,39 @@ export default async function handler(req,res) {
     id:person.id,
     name:person.name,
     character:person.character||"",
-    profilePath:person.profile_path||""
+    profilePath:person.profile_path||"",
+    jobs:["Actor"]
   }));
-  const directorPerson=(credits.crew||[]).find(person=>person.job==="Director");
+  const productionJobs=new Set([
+    "Director","Producer","Executive Producer","Co-Producer","Associate Producer",
+    "Music Director","Music","Original Music Composer","Composer","Music Supervisor",
+    "Writer","Screenplay","Story","Teleplay","Screenwriter","Director of Photography",
+    "Cinematography","Editor","Production Design","Art Direction","Costume Design",
+    "Sound Designer","Casting Director"
+  ]);
+  const productionPeople=new Map();
+  for (const person of credits.crew||[]) {
+    if (!productionJobs.has(person.job)||!person.id) continue;
+    const current=productionPeople.get(person.id)||{
+      id:person.id,
+      name:person.name,
+      profilePath:person.profile_path||"",
+      jobs:[]
+    };
+    if (!current.jobs.includes(person.job)) current.jobs.push(person.job);
+    productionPeople.set(person.id,current);
+  }
   const creator=(data.created_by||[])[0];
-  const directorDetails=directorPerson
-    ? {id:directorPerson.id,name:directorPerson.name,profilePath:directorPerson.profile_path||""}
-    : creator
-      ? {id:creator.id,name:creator.name,profilePath:creator.profile_path||""}
-      : null;
+  if (creator?.id&&!productionPeople.has(creator.id)) {
+    productionPeople.set(creator.id,{
+      id:creator.id,
+      name:creator.name,
+      profilePath:creator.profile_path||"",
+      jobs:["Creator"]
+    });
+  }
+  const production=[...productionPeople.values()];
+  const directorDetails=production.find(person=>person.jobs.includes("Director"))||null;
   const trailer=(data.videos?.results||[]).find(video=>
     video.site==="YouTube"&&["Trailer","Teaser"].includes(video.type)
   );
@@ -92,7 +116,8 @@ export default async function handler(req,res) {
     castDetails,
     director:directorDetails?.name||"",
     directorDetails,
-    directorLabel:type==="series"&&creator&&!directorPerson?"CREATOR":"DIRECTOR",
+    production,
+    directorLabel:type==="series"&&creator&&!directorDetails?"CREATOR":"DIRECTOR",
     trailerKey:trailer?.key||"",
     imdbId,
     imdbRating,

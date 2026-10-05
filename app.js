@@ -30,6 +30,10 @@ let activeChatUser = null;
 let chatRefreshTimer = null;
 let notificationRefreshTimer = null;
 
+function personPageUrl(person) {
+  return person?.id?`person.html?id=${encodeURIComponent(person.id)}`:"";
+}
+
 function tmdbHeaders() {
   const key = localStorage.getItem("cinevault-tmdb-key");
   return key ? {"X-TMDB-API-Key": key} : {};
@@ -275,6 +279,13 @@ function shell() {
   $("#profile").onclick = profileModal;
   $("#logout").onclick = $("#logoutTop").onclick = logout;
   $("#notificationBell").onclick=toggleNotifications;
+  window.onpopstate=e=>{
+    if (!e.state?.cineVaultRoute) return;
+    $("#stage")?.remove();
+    $("#profileImageViewer")?.remove();
+    document.querySelectorAll(".modal").forEach(modal=>modal.remove());
+    show(e.state.tab,e.state.routeParam||"");
+  };
   document.onkeydown=e=>{
     if (e.key==="Escape") {
       e.preventDefault();
@@ -286,6 +297,17 @@ function shell() {
       $("#search").value="";
       searchQuery="";
       show("archive");
+      return;
+    }
+    const editingTarget=e.target instanceof Element&&e.target.closest("input,textarea,[contenteditable='true']");
+    if ((e.ctrlKey||e.metaKey)&&!editingTarget&&e.key.toLowerCase()==="z") {
+      e.preventDefault();
+      history.back();
+      return;
+    }
+    if ((e.ctrlKey||e.metaKey)&&!editingTarget&&e.key.toLowerCase()==="y") {
+      e.preventDefault();
+      history.forward();
       return;
     }
     if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k") {
@@ -314,6 +336,13 @@ function shell() {
 }
 
 async function show(tab, q = "") {
+  const routeParam=tab==="sharedLibrary"?String(q||""):"";
+  if (!history.state?.cineVaultRoute) {
+    const state=history.state&&typeof history.state==="object"?history.state:{};
+    history.replaceState({...state,cineVaultRoute:true,tab,routeParam},"",location.href);
+  } else if (history.state.tab!==tab||history.state.routeParam!==routeParam) {
+    history.pushState({...history.state,cineVaultRoute:true,tab,routeParam},"",location.href);
+  }
   if (tab !== "sharedLibrary") stopSharedLibraryMonitor();
   if (tab !== "network") clearInterval(chatRefreshTimer);
   activeTab = tab;
@@ -847,34 +876,44 @@ function renderMovieFacts(movie) {
 }
 
 function renderCredits(movie) {
-  const director=movie.directorDetails||{name:movie.director||"",profilePath:""};
+  const production=Array.isArray(movie.production)&&movie.production.length
+    ? movie.production
+    : movie.directorDetails?.name
+      ? [{...movie.directorDetails,jobs:[movie.directorLabel||"Director"]}]
+      : movie.director
+        ? [{name:movie.director,profilePath:"",jobs:[movie.directorLabel||"Director"]}]
+        : [];
   const cast=Array.isArray(movie.castDetails)&&movie.castDetails.length
     ? movie.castDetails
     : (movie.cast||[]).map(person=>typeof person==="string"?{name:person}:person);
+  const personCard=(person,kind)=>`
+    <article class="${kind}Credit">
+      ${personPageUrl(person)
+        ? `<a class="creditPortraitLink" href="${personPageUrl(person)}" target="_blank" rel="noopener" aria-label="Open ${esc(person.name)}'s biography in a new tab">`
+        : '<span class="creditPortraitLink">'}
+        ${person.profilePath
+          ? `<img src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
+          : `<span class="creditInitials">${esc(creditInitials(person.name))}</span>`}
+      ${personPageUrl(person)?'</a>':"</span>"}
+      <b>${esc(person.name||"Crew member")}</b>
+      <div class="creditTags">${(person.jobs||[]).map(job=>`<span class="creditTag">${esc(job)}</span>`).join("")}</div>
+      ${person.character?`<small>${esc(person.character)}</small>`:""}
+    </article>`;
   return `
     ${renderMovieFacts(movie)}
     <div class="creditSection">
-      <span class="creditSectionLabel">${esc(movie.directorLabel||"DIRECTOR")}</span>
-      ${director.name
-        ? `<div class="directorCredit">
-            ${director.profilePath
-              ? `<img src="${esc(creditImage(director.profilePath))}" alt="${esc(director.name)}">`
-              : `<span class="creditInitials">${esc(creditInitials(director.name))}</span>`}
-            <b>${esc(director.name)}</b>
-          </div>`
-        : '<p class="creditEmpty">Director details unavailable.</p>'}
+      <span class="creditSectionLabel">PRODUCTION</span>
+      ${production.length
+        ? `<div class="productionCredits">${production.map(person=>personCard(person,"production")).join("")}</div>`
+        : '<p class="creditEmpty">Production credits unavailable.</p>'}
     </div>
     <div class="creditSection">
       <span class="creditSectionLabel">CAST</span>
       ${cast.length
-        ? `<div class="castCredits">${cast.map(person=>`
-            <article class="castCredit">
-              ${person.profilePath
-                ? `<img src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
-                : `<span class="creditInitials">${esc(creditInitials(person.name))}</span>`}
-              <b>${esc(person.name||"Cast member")}</b>
-              ${person.character?`<small>${esc(person.character)}</small>`:""}
-            </article>`).join("")}</div>`
+        ? `<div class="castCredits">${cast.map(person=>personCard({
+            ...person,
+            jobs:person.jobs?.length?person.jobs:["Actor"]
+          },"cast")).join("")}</div>`
         : '<p class="creditEmpty">Cast details unavailable.</p>'}
     </div>`;
 }
