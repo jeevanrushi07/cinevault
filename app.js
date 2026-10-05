@@ -850,6 +850,18 @@ async function toggleSimilarRecommendations(button) {
   const control=card?.querySelector(".archiveRecommendationExpand");
   if (!card||!expansion||!rail||!control) return;
   const open=control.getAttribute("aria-expanded")==="true";
+  if (!open) {
+    card.parentElement.querySelectorAll(".archiveRecommendationCard.expanded").forEach(other=>{
+      if (other===card) return;
+      other.classList.remove("expanded");
+      other.querySelector(".archiveRecommendationExpansion").hidden=true;
+      other.querySelector(".archiveRecommendationExpand").setAttribute("aria-expanded","false");
+      other.querySelector(".archiveRecommendationExpand").innerHTML="MORE LIKE THIS <span>＋</span>";
+      other.querySelectorAll(".archiveRecommendationExpandTrigger").forEach(trigger=>
+        trigger.setAttribute("aria-expanded","false")
+      );
+    });
+  }
   control.setAttribute("aria-expanded",String(!open));
   card.querySelectorAll(".archiveRecommendationExpandTrigger").forEach(trigger=>
     trigger.setAttribute("aria-expanded",String(!open))
