@@ -2534,6 +2534,16 @@ function applyStageTrailerAudio(player=stageTrailerPlayer) {
 window.setStageTrailerAudio=enabled=>{
   stageTrailerAudioEnabled=Boolean(enabled);
   applyStageTrailerAudio();
+  if (!stageTrailerAudioEnabled||trailerReadMode||!stageTrailerMovie||!stageTrailerPageActive||document.hidden) return;
+  clearTimeout(stageTrailerIdleTimer);
+  stageTrailerIdleTimer=null;
+  stageTrailerIsIdle=true;
+  $("#stage")?.classList.add("trailerContentHidden");
+  if (stageTrailerPlayer) {
+    stageTrailerPlayer.playVideo();
+  } else {
+    startStageTrailerAfterIdle(stageTrailerGeneration);
+  }
 };
 
 function navigateStageMovie(direction) {
