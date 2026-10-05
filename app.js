@@ -44,6 +44,8 @@ let stageTrailerCandidateIndex = 0;
 let youtubePlayerApiPromise = null;
 let archiveSearchScrollHandler = null;
 let archiveSearchCompressed = false;
+let headerSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[]};
+let addSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[]};
 let trailerReadMode = localStorage.getItem("cinevault-read-mode")==="true";
 const copyFeedbackTimers = new WeakMap();
 
@@ -301,6 +303,11 @@ function shell() {
   $("#profile").onclick = profileModal;
   $("#logout").onclick = $("#logoutTop").onclick = logout;
   $("#notificationBell").onclick=toggleNotifications;
+  $("#searchResults").onscroll=()=>{
+    const panel=$("#searchResults");
+    if (!panel||panel.scrollHeight-panel.scrollTop-panel.clientHeight>120) return;
+    loadHeaderSearchPage();
+  };
   archiveSearchScrollHandler=()=>{
     if (window.scrollY>0) {
       archiveSearchCompressed=true;
@@ -1814,27 +1821,30 @@ async function addModal() {
     clearTimeout(timer);
     timer=setTimeout(()=>searchTitles(input.value),250);
   };
+  $("#results").onscroll=()=>{
+    const panel=$("#results");
+    if (!panel||panel.scrollHeight-panel.scrollTop-panel.clientHeight>120) return;
+    searchTitles(input.value);
+  };
 }
 
 async function searchTitles(q) {
-  if (!q.trim()) {
-    $("#results").innerHTML="";
+  const results=$("#results");
+  if (!results) return;
+  if (q.trim().length<2) {
+    addSearchState={query:"",page:0,totalPages:1,loading:false,request:addSearchState.request+1,items:[]};
+    results.innerHTML="";
     return;
   }
-
-  try {
-    const results=await fetchTitles(q);
-    $("#results").innerHTML=results.length
-      ? results.map(x=>titleResultMarkup(x)).join("")
-      : '<p class="muted">No matching titles.</p>';
-  } catch(error) {
-    $("#results").innerHTML=`<p class="muted">${esc(error.message)}</p>`;
+  if (addSearchState.query!==q.trim()) {
+    addSearchState={query:q.trim(),page:0,totalPages:1,loading:false,request:addSearchState.request+1,items:[]};
   }
+  await loadAddSearchPage();
 }
 
-async function fetchTitles(query) {
+async function fetchTitlePage(query,page=1) {
   const response=await fetch(
-    "/api/search?query="+encodeURIComponent(query),
+    `/api/search?query=${encodeURIComponent(query)}&page=${page}`,
     {headers:tmdbHeaders()}
   );
   const result=await response.json().catch(()=>({}));
@@ -1846,7 +1856,61 @@ async function fetchTitles(query) {
     throw new Error(result.error||"Movie search is unavailable right now.");
   }
 
-  return (result.results||[]).filter(x=>["movie","tv"].includes(x.media_type)).slice(0,8);
+  return {
+    results:(result.results||[]).filter(x=>["movie","tv"].includes(x.media_type)),
+    page:Number(result.page)||page,
+    totalPages:Math.max(1,Math.min(500,Number(result.total_pages)||1))
+  };
+}
+
+function appendUniqueTitles(existing,incoming) {
+  const seen=new Set(existing.map(item=>`${item.media_type}:${item.id}`));
+  return [...existing,...incoming.filter(item=>{
+    const key=`${item.media_type}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })];
+}
+
+async function loadAddSearchPage() {
+  if (addSearchState.loading||addSearchState.page>=addSearchState.totalPages) return;
+  const results=$("#results");
+  if (!results) return;
+  addSearchState.loading=true;
+  const request=addSearchState.request;
+  const requestedPage=addSearchState.page+1;
+  results.insertAdjacentHTML("beforeend",'<p class="muted searchStatus searchPageStatus">Loading more titles…</p>');
+  try {
+    const page=await fetchTitlePage(addSearchState.query,requestedPage);
+    if (request!==addSearchState.request||!$("#results")) return;
+    addSearchState.items=appendUniqueTitles(addSearchState.items,page.results);
+    addSearchState.page=page.page;
+    addSearchState.totalPages=page.totalPages;
+    renderAddSearchResults();
+  } catch(error) {
+    if (request!==addSearchState.request) return;
+    results.querySelector(".searchPageStatus")?.remove();
+    results.insertAdjacentHTML("beforeend",`<p class="muted searchStatus searchPageStatus">${esc(error.message)}</p>`);
+  } finally {
+    if (request===addSearchState.request) addSearchState.loading=false;
+  }
+}
+
+function renderAddSearchResults() {
+  const results=$("#results");
+  if (!results) return;
+  results.innerHTML=addSearchState.items.length
+    ? addSearchState.items.map(item=>titleResultMarkup(item)).join("")
+    : '<p class="muted">No matching titles.</p>';
+  if (addSearchState.page<addSearchState.totalPages) {
+    results.insertAdjacentHTML("beforeend",'<p class="muted searchStatus searchPageStatus">Scroll for more titles</p>');
+  } else {
+    results.insertAdjacentHTML("beforeend",'<p class="muted searchStatus searchPageStatus">End of results</p>');
+  }
+  if (addSearchState.page<addSearchState.totalPages&&results.scrollHeight<=results.clientHeight+8) {
+    setTimeout(()=>loadAddSearchPage(),0);
+  }
 }
 
 function titleResultMarkup(item,compact=false) {
@@ -1877,31 +1941,72 @@ async function searchHeaderTitles(query) {
   if (!results) return;
 
   if (query.trim().length<2) {
+    headerSearchState={query:"",page:0,totalPages:1,loading:false,request:headerSearchState.request+1,items:[]};
     results.innerHTML="";
     results.classList.remove("open");
     return;
   }
 
+  const normalizedQuery=query.trim();
   const request=++headerSearchRequest;
+  headerSearchState={query:normalizedQuery,page:0,totalPages:1,loading:false,request,items:[]};
   results.innerHTML='<p class="muted searchStatus">Searching titles…</p>';
   results.classList.add("open");
 
   try {
-    const found=await fetchTitles(query);
-    if (request!==headerSearchRequest || $("#search")?.value.trim()!==query.trim()) return;
-    const alreadySaved=found.filter(item=>movies.some(movie=>String(movie.tmdbId)===String(item.id)));
-    const toAdd=found.filter(item=>!movies.some(movie=>String(movie.tmdbId)===String(item.id)));
-    results.innerHTML=found.length
-      ? `${alreadySaved.length
-          ? `<section class="searchTray alreadySavedTray"><p class="searchStatus">ALREADY IN YOUR LIBRARY</p>${alreadySaved.map(item=>titleResultMarkup(item,true)).join("")}</section>`
-          : ""}
-        ${toAdd.length
-          ? `<section class="searchTray addTitlesTray"><p class="searchStatus">ADD TO YOUR LIBRARY</p>${toAdd.map(item=>titleResultMarkup(item,true)).join("")}</section>`
-          : ""}`
-      : '<p class="muted searchStatus">No matching movies or series.</p>';
+    const page=await fetchTitlePage(normalizedQuery,1);
+    if (request!==headerSearchRequest || $("#search")?.value.trim()!==normalizedQuery) return;
+    headerSearchState.items=page.results;
+    headerSearchState.page=page.page;
+    headerSearchState.totalPages=page.totalPages;
+    renderHeaderSearchResults();
   } catch(error) {
     if (request!==headerSearchRequest) return;
     results.innerHTML=`<p class="muted searchStatus">${esc(error.message)}</p>`;
+  }
+}
+
+async function loadHeaderSearchPage() {
+  const state=headerSearchState;
+  if (state.loading||state.page>=state.totalPages||state.query!==$("#search")?.value.trim()) return;
+  const results=$("#searchResults");
+  if (!results) return;
+  state.loading=true;
+  const request=state.request;
+  const requestedPage=state.page+1;
+  results.insertAdjacentHTML("beforeend",'<p class="muted searchStatus searchPageStatus">Loading more titles…</p>');
+  try {
+    const page=await fetchTitlePage(state.query,requestedPage);
+    if (request!==headerSearchState.request||state.query!==$("#search")?.value.trim()) return;
+    state.items=appendUniqueTitles(state.items,page.results);
+    state.page=page.page;
+    state.totalPages=page.totalPages;
+    renderHeaderSearchResults();
+  } catch(error) {
+    if (request!==headerSearchState.request) return;
+    results.querySelector(".searchPageStatus")?.remove();
+    results.insertAdjacentHTML("beforeend",`<p class="muted searchStatus searchPageStatus">${esc(error.message)}</p>`);
+  } finally {
+    if (request===headerSearchState.request) state.loading=false;
+  }
+}
+
+function renderHeaderSearchResults() {
+  const results=$("#searchResults");
+  if (!results) return;
+  const alreadySaved=headerSearchState.items.filter(item=>movies.some(movie=>String(movie.tmdbId)===String(item.id)));
+  const toAdd=headerSearchState.items.filter(item=>!movies.some(movie=>String(movie.tmdbId)===String(item.id)));
+  results.innerHTML=headerSearchState.items.length
+    ? `${alreadySaved.length
+        ? `<section class="searchTray alreadySavedTray"><p class="searchStatus">ALREADY IN YOUR LIBRARY</p>${alreadySaved.map(item=>titleResultMarkup(item,true)).join("")}</section>`
+        : ""}
+      ${toAdd.length
+        ? `<section class="searchTray addTitlesTray"><p class="searchStatus">ADD TO YOUR LIBRARY</p>${toAdd.map(item=>titleResultMarkup(item,true)).join("")}</section>`
+        : ""}`
+    : '<p class="muted searchStatus">No matching movies or series.</p>';
+  results.insertAdjacentHTML("beforeend",`<p class="muted searchStatus searchPageStatus">${headerSearchState.page<headerSearchState.totalPages?"Scroll for more titles":"End of results"}</p>`);
+  if (headerSearchState.page<headerSearchState.totalPages&&results.scrollHeight<=results.clientHeight+8) {
+    setTimeout(()=>loadHeaderSearchPage(),0);
   }
 }
 
