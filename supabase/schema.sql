@@ -7,7 +7,7 @@ drop function if exists public.handle_new_user() cascade;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  username text unique not null check (username ~ '^[a-z0-9_]{3,30}$'),
+  username text unique not null check (username ~ '^[a-z0-9_.-]{3,30}$'),
   display_name text,
   avatar text,
   created_at timestamptz not null default now()
