@@ -2433,15 +2433,17 @@ function searchResultGroupsMarkup(state,titleContent) {
       </button>`).join("")
     : '<p class="muted searchStatus">No related people found.</p>';
   return `
-    <section class="searchResultBox searchTitlesBox" aria-label="Movie and series results">
-      <h3 class="searchResultBoxTitle">TITLES <span>${state.items.length}</span></h3>
-      ${titleContent}
-      ${state.page<state.totalPages?'<p class="muted searchStatus searchPageStatus">Scroll for more titles</p>':'<p class="muted searchStatus searchPageStatus">End of results</p>'}
-    </section>
-    <section class="searchResultBox searchPeopleBox" aria-label="Related people">
-      <h3 class="searchResultBoxTitle">PEOPLE <span>${state.people.length}</span></h3>
-      ${peopleContent}
-    </section>`;
+    <div class="searchResultGroups">
+      <section class="searchResultBox searchTitlesBox" aria-label="Movie and series results">
+        <h3 class="searchResultBoxTitle">TITLES <span>${state.items.length}</span></h3>
+        ${titleContent}
+        ${state.page<state.totalPages?'<p class="muted searchStatus searchPageStatus">Scroll for more titles</p>':'<p class="muted searchStatus searchPageStatus">End of results</p>'}
+      </section>
+      <section class="searchResultBox searchPeopleBox" aria-label="Related people">
+        <h3 class="searchResultBoxTitle">PEOPLE <span>${state.people.length}</span></h3>
+        ${peopleContent}
+      </section>
+    </div>`;
 }
 
 function bindSearchResultActions(container) {
