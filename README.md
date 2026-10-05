@@ -15,7 +15,7 @@ Supabase Auth internally requires an email-style identifier, so the server creat
 3. Ensure Email provider is enabled under Authentication -> Providers.
 4. Email confirmation does not need to be enabled because the server creates confirmed internal Auth users.
 
-For an existing CineVault database, run `supabase/library_sharing.sql` in Supabase SQL Editor to add expiring library sharing. Existing per-movie shares are not converted automatically.
+For a new database, also run `supabase/social_features.sql` in Supabase SQL Editor after `schema.sql`. For an existing database, run `supabase/library_sharing.sql` if library sharing is not already installed, then run `supabase/social_features.sql`. This adds network chat and notifications for messages and library-sharing changes. Existing per-movie shares are not converted automatically.
 
 ## Vercel environment variables
 
@@ -43,12 +43,15 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - TMDB live title search
 - Top-bar search filters your archive, separates already-saved titles, and finds titles to add as watched or want-to-watch
 - Top-right logout control
+- Network directory with private messaging
+- Notification bell for new messages and library-sharing changes
 - Movie titles open a web search for that title
 - Movie details, cast, director, trailer and metadata
 - Personal movie notes
 - Search across title/cast/director/genre/year
 - Read-only sharing of watched and want-to-watch libraries
 - 1-day, 1-week, 1-month, or until-revoked sharing
+- 1-hour and custom-expiry library access
 - Incoming and outgoing library shares with immediate revocation
 - Character collection
 - Supabase Row Level Security

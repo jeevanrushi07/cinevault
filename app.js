@@ -24,6 +24,11 @@ let activeTab = "archive";
 let searchQuery = "";
 let sharedLibraryTimer = null;
 let activeSharedShareId = null;
+let notifications = [];
+let networkUsers = [];
+let activeChatUser = null;
+let chatRefreshTimer = null;
+let notificationRefreshTimer = null;
 
 function tmdbHeaders() {
   const key = localStorage.getItem("cinevault-tmdb-key");
@@ -112,24 +117,29 @@ async function loadData() {
 
   currentUser = user;
 
-  const [p, m, c, s] = await Promise.all([
+  const [p, m, c, s, n] = await Promise.all([
     supabaseClient.from("profiles").select("*").eq("id", user.id).single(),
     supabaseClient.from("movies").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
     supabaseClient.from("characters").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
     supabaseClient.from("library_shares").select(
       "id,created_at,expires_at,sender_id,receiver_id"
-    ).or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order("created_at",{ascending:false})
+    ).or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order("created_at",{ascending:false}),
+    supabaseClient.from("notifications").select(
+      "id,actor_id,notification_type,resource_id,created_at,read_at"
+    ).eq("user_id",user.id).order("created_at",{ascending:false}).limit(50)
   ]);
 
   if (p.error) throw p.error;
   if (m.error) throw m.error;
   if (c.error) throw c.error;
   if (s.error) throw s.error;
+  if (n.error) throw n.error;
 
   const shares=s.data||[];
-  const participantIds=[...new Set(shares.flatMap(share=>[
-    share.sender_id,share.receiver_id
-  ]))];
+  const participantIds=[...new Set([
+    ...shares.flatMap(share=>[share.sender_id,share.receiver_id]),
+    ...(n.data||[]).map(notification=>notification.actor_id).filter(Boolean)
+  ])];
   let shareProfiles=[];
 
   if (participantIds.length) {
@@ -150,6 +160,10 @@ async function loadData() {
   outgoingShares = shares
     .filter(share => share.sender_id === user.id)
     .map(share=>({...share,receiver:{username:usernames.get(share.receiver_id)||"user"}}));
+  notifications=(n.data||[]).map(notification=>({
+    ...notification,
+    actor:{username:usernames.get(notification.actor_id)||"Someone"}
+  }));
 }
 
 async function saveMovie(m, status) {
@@ -201,6 +215,7 @@ function shell() {
           <button data-tab="archive">◉ Archive</button>
           <button data-tab="recent">◷ Recent</button>
           <button data-tab="shared">◎ Shared</button>
+          <button data-tab="network">✉ Network</button>
           <button data-tab="characters">✦ Characters</button>
         </nav>
         <div class="side">
@@ -220,6 +235,10 @@ function shell() {
             <div id="searchResults" class="headerResults"></div>
           </div>
           <button id="addTop" aria-label="Add a movie">＋</button>
+          <div class="notificationWrap">
+            <button id="notificationBell" class="notificationBell" aria-label="Notifications">🔔<span id="notificationCount" class="notificationCount"></span></button>
+            <div id="notificationPanel" class="notificationPanel"></div>
+          </div>
           <button id="logoutTop" class="headerLogout">↪ Logout</button>
         </header>
         <div id="content"></div>
@@ -232,6 +251,7 @@ function shell() {
   $("#share").onclick = shareLibraryModal;
   $("#profile").onclick = profileModal;
   $("#logout").onclick = $("#logoutTop").onclick = logout;
+  $("#notificationBell").onclick=toggleNotifications;
   let headerSearchTimer;
   $("#search").oninput = e => {
     searchQuery = e.target.value;
@@ -244,11 +264,16 @@ function shell() {
   };
   document.addEventListener("click",e=>{
     if (!e.target.closest(".search")) $("#searchResults").classList.remove("open");
+    if (!e.target.closest(".notificationWrap")) $("#notificationPanel").classList.remove("open");
   });
+  updateNotificationBadge();
+  clearInterval(notificationRefreshTimer);
+  notificationRefreshTimer=setInterval(refreshNotifications,20000);
 }
 
 async function show(tab, q = "") {
   if (tab !== "sharedLibrary") stopSharedLibraryMonitor();
+  if (tab !== "network") clearInterval(chatRefreshTimer);
   activeTab = tab;
   const c = $("#content");
   if (!c) return;
@@ -261,6 +286,12 @@ async function show(tab, q = "") {
   if (tab === "characters") {
     c.innerHTML = characterWall();
     $("#randomCharacter")?.addEventListener("click", randomCharacter);
+    return;
+  }
+
+  if (tab === "network") {
+    c.innerHTML='<p class="muted">Loading your network…</p>';
+    await renderNetwork();
     return;
   }
 
@@ -312,16 +343,320 @@ async function show(tab, q = "") {
   });
 }
 
-function poster(m,i=0,mutual=false,readOnly=false) {
+function updateNotificationBadge() {
+  const badge=$("#notificationCount");
+  if (!badge) return;
+  const unread=notifications.filter(notification=>!notification.read_at).length;
+  badge.textContent=unread ? String(unread>99?"99+":unread) : "";
+  badge.classList.toggle("visible",unread>0);
+}
+
+function notificationText(notification) {
+  const actor=notification.actor?.username||"Someone";
+  if (notification.notification_type==="library_shared") return `@${actor} shared their library with you.`;
+  if (notification.notification_type==="library_access_revoked") return `Library access with @${actor} was revoked.`;
+  if (notification.notification_type==="library_access_updated") return `@${actor} changed your library access.`;
+  if (notification.notification_type==="message_received") return `New message from @${actor}.`;
+  return `New activity from @${actor}.`;
+}
+
+function renderNotificationPanel() {
+  const panel=$("#notificationPanel");
+  if (!panel) return;
+  panel.innerHTML=`
+    <div class="notificationPanelHead">
+      <b>Notifications</b>
+      <button onclick="markAllNotificationsRead()">Mark all read</button>
+    </div>
+    ${notifications.length
+      ? notifications.map(notification=>`
+        <button class="notificationItem ${notification.read_at?"":"unread"}" onclick="openNotification('${notification.id}')">
+          <span>${esc(notificationText(notification))}</span>
+          <small>${new Date(notification.created_at).toLocaleString()}</small>
+        </button>`).join("")
+      : '<p class="muted notificationEmpty">You’re all caught up.</p>'}`;
+}
+
+async function refreshNotifications() {
+  if (!currentUser) return;
+  const {data,error}=await supabaseClient.from("notifications")
+    .select("id,actor_id,notification_type,resource_id,created_at,read_at")
+    .eq("user_id",currentUser.id)
+    .order("created_at",{ascending:false})
+    .limit(50);
+  if (error) {
+    console.error("Could not refresh notifications.",error);
+    return;
+  }
+
+  const rows=data||[];
+  const actorIds=[...new Set(rows.map(notification=>notification.actor_id).filter(Boolean))];
+  let actors=[];
+  if (actorIds.length) {
+    const {data:profiles,error:profileError}=await supabaseClient.from("profiles")
+      .select("id,username")
+      .in("id",actorIds);
+    if (profileError) {
+      console.error("Could not load notification names.",profileError);
+      return;
+    }
+    actors=profiles||[];
+  }
+  const usernames=new Map(actors.map(actor=>[actor.id,actor.username]));
+  notifications=rows.map(notification=>({
+    ...notification,
+    actor:{username:usernames.get(notification.actor_id)||"Someone"}
+  }));
+  updateNotificationBadge();
+  if ($("#notificationPanel")?.classList.contains("open")) renderNotificationPanel();
+}
+
+async function toggleNotifications() {
+  const panel=$("#notificationPanel");
+  if (!panel) return;
+  panel.classList.toggle("open");
+  if (panel.classList.contains("open")) {
+    await refreshNotifications();
+    renderNotificationPanel();
+  }
+}
+
+window.markAllNotificationsRead=async()=>{
+  const {error}=await supabaseClient.rpc("mark_notifications_read",{p_notification_id:null});
+  if (error) return alert(`Could not mark notifications as read: ${error.message}`);
+  notifications=notifications.map(notification=>({...notification,read_at:notification.read_at||new Date().toISOString()}));
+  updateNotificationBadge();
+  renderNotificationPanel();
+};
+
+window.openNotification=async id=>{
+  const notification=notifications.find(item=>item.id===id);
+  const {error}=await supabaseClient.rpc("mark_notifications_read",{p_notification_id:id});
+  if (error) return alert(`Could not mark notification as read: ${error.message}`);
+  notifications=notifications.map(item=>item.id===id?{...item,read_at:new Date().toISOString()}:item);
+  updateNotificationBadge();
+  $("#notificationPanel")?.classList.remove("open");
+  if (!notification) return;
+  if (notification.notification_type==="message_received" && notification.actor_id) {
+    await show("network");
+    await openChat(notification.actor_id);
+  } else {
+    await loadData();
+    await show("shared");
+  }
+};
+
+async function renderNetwork() {
+  if (!networkUsers.length) {
+    const users=[];
+    const pageSize=500;
+    for (let start=0;;start+=pageSize) {
+      const {data,error}=await supabaseClient.from("profiles")
+        .select("id,username,display_name")
+        .neq("id",currentUser.id)
+        .order("username")
+        .range(start,start+pageSize-1);
+      if (error) {
+        $("#content").innerHTML=`<p class="muted">Could not load your network: ${esc(error.message)}</p>`;
+        return;
+      }
+      users.push(...(data||[]));
+      if (!data || data.length<pageSize) break;
+    }
+    networkUsers=users;
+  }
+
+  const selected=activeChatUser
+    ? networkUsers.find(user=>user.id===activeChatUser.id)||activeChatUser
+    : null;
+  $("#content").innerHTML=`
+    <section class="networkPage">
+      <div class="head"><div><span>CINEVAULT NETWORK</span><h2>People</h2></div><small>${networkUsers.length} USERS</small></div>
+      <div class="networkLayout">
+        <div class="networkDirectory">
+          <input id="networkSearch" class="field networkSearch" placeholder="Find a person">
+          <div id="networkUsers">${networkUserRows(networkUsers,selected?.id)}</div>
+        </div>
+        <section id="chatPanel" class="chatPanel">
+          ${selected
+            ? chatShell(selected)
+            : '<div class="chatEmpty"><b>Start a conversation</b><p>Select someone from your network to message or manage library access.</p></div>'}
+        </section>
+      </div>
+    </section>`;
+
+  $("#networkSearch").oninput=event=>{
+    const query=event.target.value.trim().toLowerCase();
+    const filtered=networkUsers.filter(user=>
+      `${user.username} ${user.display_name||""}`.toLowerCase().includes(query)
+    );
+    $("#networkUsers").innerHTML=networkUserRows(filtered,selected?.id);
+    bindNetworkUserButtons();
+  };
+  bindNetworkUserButtons();
+  if (selected) {
+    await refreshChatMessages(selected,true);
+    clearInterval(chatRefreshTimer);
+    chatRefreshTimer=setInterval(()=>refreshChatMessages(activeChatUser,true),5000);
+    $("#chatShareDuration").onchange=event=>{
+      $("#chatCustomExpiry").hidden=event.target.value!=="custom";
+    };
+  }
+}
+
+function networkUserRows(users,selectedId) {
+  return users.map(user=>`
+    <button class="networkUser ${user.id===selectedId?"selected":""}" data-user-id="${user.id}">
+      <span class="networkAvatar">${esc((user.display_name||user.username).slice(0,1).toUpperCase())}</span>
+      <span><b>@${esc(user.username)}</b><small>${esc(user.display_name||"CineVault member")}</small></span>
+      <span class="networkUserAction">Chat</span>
+    </button>`).join("")||'<p class="muted networkEmpty">No users found.</p>';
+}
+
+function bindNetworkUserButtons() {
+  document.querySelectorAll(".networkUser").forEach(button=>{
+    button.onclick=()=>openChat(button.dataset.userId);
+  });
+}
+
+async function openChat(userId) {
+  const user=networkUsers.find(person=>person.id===userId);
+  if (!user) {
+    const {data,error}=await supabaseClient.from("profiles")
+      .select("id,username,display_name").eq("id",userId).maybeSingle();
+    if (error) return alert(`Could not open this conversation: ${error.message}`);
+    if (!data) return alert("This user is no longer available.");
+    activeChatUser=data;
+    networkUsers.push(data);
+  } else {
+    activeChatUser=user;
+  }
+
+  clearInterval(chatRefreshTimer);
+  await renderNetwork();
+}
+
+function chatShell(user) {
+  const share=outgoingShares.find(item=>item.receiver_id===user.id&&shareIsActive(item));
   return `
-    <article class="poster p${i%7} ${mutual?"mutual":""}" draggable="${!readOnly}" data-id="${m.tmdbId}">
+    <div class="chatHeader">
+      <div><b>@${esc(user.username)}</b><small>Private conversation</small></div>
+    </div>
+    <div class="chatAccess">
+      <span>${share?`Library access · ${esc(shareExpiryText(share))}`:"Library not shared"}</span>
+      <label for="chatShareDuration">ACCESS</label>
+      <select id="chatShareDuration" class="field">
+        <option value="1h">1 hour</option>
+        <option value="1d">1 day</option>
+        <option value="7d">1 week</option>
+        <option value="30d">1 month</option>
+        <option value="custom">Custom time…</option>
+        <option value="forever">Until revoked</option>
+      </select>
+      <input id="chatCustomExpiry" class="field customExpiry" type="datetime-local" aria-label="Custom access expiry" hidden>
+      <button class="primary" onclick="shareLibraryFromChat('${user.id}')">${share?"Update access":"Share library"}</button>
+      ${share?`<button class="danger" onclick="revokeShare('${share.id}')">Revoke</button>`:""}
+    </div>
+    <div id="chatMessages" class="chatMessages"></div>
+    <form id="chatForm" class="chatForm">
+      <input id="chatInput" class="field" maxlength="2000" placeholder="Write a message…" autocomplete="off">
+      <button class="primary" type="submit">Send</button>
+    </form>`;
+}
+
+async function refreshChatMessages(user,markRead=true) {
+  if (!user || activeTab!=="network" || activeChatUser?.id!==user.id) return;
+  const {data,error}=await supabaseClient.from("messages")
+    .select("id,sender_id,receiver_id,body,created_at,read_at")
+    .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${user.id}),and(sender_id.eq.${user.id},receiver_id.eq.${currentUser.id})`)
+    .order("created_at",{ascending:false}).limit(200);
+  if (error) {
+    const panel=$("#chatMessages");
+    if (panel) panel.innerHTML=`<p class="muted">Could not load messages: ${esc(error.message)}</p>`;
+    return;
+  }
+  if (activeTab!=="network" || activeChatUser?.id!==user.id) return;
+  const messages=(data||[]).reverse();
+  const panel=$("#chatMessages");
+  if (!panel) return;
+  const wasAtBottom=panel.scrollHeight-panel.scrollTop-panel.clientHeight<80;
+  panel.innerHTML=messages.map(message=>`
+    <article class="chatMessage ${message.sender_id===currentUser.id?"sent":"received"}">
+      <p>${esc(message.body)}</p><small>${new Date(message.created_at).toLocaleString()}</small>
+    </article>`).join("")||'<p class="muted chatEmptyMessages">No messages yet. Say hello!</p>';
+  if (wasAtBottom || !panel.dataset.loaded) panel.scrollTop=panel.scrollHeight;
+  panel.dataset.loaded="true";
+
+  if (markRead && messages.some(message=>message.receiver_id===currentUser.id&&!message.read_at)) {
+    const {error:readError}=await supabaseClient.rpc("mark_messages_read",{p_sender_id:user.id});
+    if (readError) console.error("Could not mark messages as read.",readError);
+    else refreshNotifications();
+  }
+
+  const form=$("#chatForm");
+  if (form && !form.dataset.bound) {
+    form.dataset.bound="true";
+    form.onsubmit=async event=>{
+      event.preventDefault();
+      const input=$("#chatInput");
+      const body=input.value.trim();
+      if (!body) return;
+      const {error:sendError}=await supabaseClient.from("messages").insert({
+        sender_id:currentUser.id,receiver_id:user.id,body
+      });
+      if (sendError) return alert(`Could not send message: ${sendError.message}`);
+      input.value="";
+      await refreshChatMessages(user,false);
+      refreshNotifications();
+    };
+  }
+}
+
+function shareExpiration(duration,customInput) {
+  const durations={"1h":60*60*1000,"1d":24*60*60*1000,"7d":7*24*60*60*1000,"30d":30*24*60*60*1000};
+  if (duration==="forever") return null;
+  if (duration==="custom") {
+    const value=customInput?.value;
+    if (!value || !Number.isFinite(Date.parse(value)) || Date.parse(value)<=Date.now()) {
+      throw new Error("Choose a future date and time for custom access.");
+    }
+    return new Date(value).toISOString();
+  }
+  if (!durations[duration]) throw new Error("Choose a valid library access duration.");
+  return new Date(Date.now()+durations[duration]).toISOString();
+}
+
+window.shareLibraryFromChat=async userId=>{
+  let expiresAt;
+  try {
+    expiresAt=shareExpiration($("#chatShareDuration").value,$("#chatCustomExpiry"));
+  } catch(error) {
+    return alert(error.message);
+  }
+  const {error}=await supabaseClient.from("library_shares").upsert({
+    sender_id:currentUser.id,receiver_id:userId,created_at:new Date().toISOString(),expires_at:expiresAt
+  },{onConflict:"sender_id,receiver_id"});
+  if (error) return alert(`Could not share your library: ${error.message}`);
+  try {
+    await loadData();
+    await renderNetwork();
+  } catch(loadError) {
+    alert(`Library access was updated, but the network could not be refreshed: ${loadError.message}`);
+  }
+};
+
+function poster(m,i=0,mutual=false,readOnly=false,existingStatus="") {
+  return `
+    <article class="poster p${i%7} ${mutual?"mutual":""} ${readOnly&&existingStatus?"sharedDuplicate":""} ${readOnly&&existingStatus==="watched"?"sharedWatched":""}" draggable="${!existingStatus}" data-shared="${readOnly}" data-id="${m.tmdbId}">
       <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
       <div class="shade">
         <small>${esc(m.year || "")}</small>
         <b>${esc(m.title)}</b>
         <small>${esc((m.genres||[]).slice(0,2).join(" · "))}</small>
       </div>
-      ${mutual ? "<em>WATCHED</em>" : ""}
+      ${readOnly&&existingStatus
+        ? `<em>${existingStatus==="watched"?"ALREADY WATCHED":"IN YOUR WATCHLIST"}</em>`
+        : mutual ? "<em>WATCHED</em>" : ""}
     </article>`;
 }
 
@@ -351,12 +686,25 @@ function watchlist() {
 
 window.dropWatch = async e => {
   e.preventDefault();
-  const id = e.dataTransfer.getData("text/plain");
-  const m = movies.find(x => String(x.tmdbId) === String(id));
-  if (!m) return;
 
   try {
-    await updateMovie(m,{status:"want"});
+    const sharedPayload=e.dataTransfer.getData("application/x-cinevault-movie");
+    if (sharedPayload) {
+      const sharedMovie=JSON.parse(sharedPayload);
+      const existing=movies.find(movie=>String(movie.tmdbId)===String(sharedMovie.tmdbId));
+      if (existing) {
+        alert(existing.status==="watched"
+          ? `${existing.title} is already marked watched.`
+          : `${existing.title} is already in your want-to-watch list.`);
+        return;
+      }
+      await saveMovie(sharedMovie,"want");
+    } else {
+      const id=e.dataTransfer.getData("text/plain");
+      const m=movies.find(x=>String(x.tmdbId)===String(id));
+      if (!m) return;
+      await updateMovie(m,{status:"want"});
+    }
     show("archive");
   } catch(err) {
     alert(err.message);
@@ -550,6 +898,7 @@ async function renderSharedLibrary(shareId) {
   }
 
   const sharedMovies=(data||[]).map(normalizeMovie);
+  const ownMovies=new Map(movies.map(movie=>[String(movie.tmdbId),movie]));
   const watched=sharedMovies.filter(m=>m.status==="watched");
   const want=sharedMovies.filter(m=>m.status==="want");
   const owner=incomingShares.find(s=>s.id===shareId)?.sender?.username||"user";
@@ -562,17 +911,25 @@ async function renderSharedLibrary(shareId) {
       </div>
       <p class="muted">${shareExpiryText(share)} · ${watched.length} watched · ${want.length} want to watch</p>
       <div class="head"><div><span>WATCHED</span><h2>Seen</h2></div><small>${watched.length} TITLES</small></div>
+      <p class="muted sharedLibraryHint">Drag a title to your Want to watch panel. Titles already in your library are marked.</p>
       ${watched.length
-        ? `<div class="wall">${watched.map((m,i)=>poster(m,i,false,true)).join("")}</div>`
+        ? `<div class="wall">${watched.map((m,i)=>poster(m,i,false,true,ownMovies.get(String(m.tmdbId))?.status||"")).join("")}</div>`
         : '<p class="muted">No watched titles in this library.</p>'}
       <div class="head"><div><span>UP NEXT</span><h2>Want to watch</h2></div><small>${want.length} TITLES</small></div>
       ${want.length
-        ? `<div class="wall">${want.map((m,i)=>poster(m,i,false,true)).join("")}</div>`
+        ? `<div class="wall">${want.map((m,i)=>poster(m,i,false,true,ownMovies.get(String(m.tmdbId))?.status||"")).join("")}</div>`
         : '<p class="muted">No titles in the want-to-watch list.</p>'}
     </section>`;
 
   document.querySelectorAll("#content .poster").forEach(card=>{
-    card.onclick=()=>stage(sharedMovies.find(m=>String(m.tmdbId)===card.dataset.id),true);
+    const movie=sharedMovies.find(m=>String(m.tmdbId)===card.dataset.id);
+    card.onclick=()=>stage(movie,true);
+    if (card.draggable && movie) {
+      card.ondragstart=event=>{
+        event.dataTransfer.setData("application/x-cinevault-movie",JSON.stringify(movie));
+        event.dataTransfer.setData("text/plain",String(movie.tmdbId));
+      };
+    }
   });
 
   if (sharedLibraryTimer) clearInterval(sharedLibraryTimer);
@@ -648,17 +1005,23 @@ function shareLibraryModal() {
         <p>Recipients can view your watched and want-to-watch lists. They cannot change your library.</p>
         <label class="shareExpiryLabel" for="shareDuration">ACCESS FOR</label>
         <select id="shareDuration" class="field shareDuration">
-          <option value="1">1 day</option>
-          <option value="7">1 week</option>
-          <option value="30">1 month</option>
-          <option value="forever">Until I revoke access</option>
-        </select>
+            <option value="1h">1 hour</option>
+            <option value="1d">1 day</option>
+            <option value="7d">1 week</option>
+            <option value="30d">1 month</option>
+            <option value="custom">Custom time…</option>
+            <option value="forever">Until I revoke access</option>
+          </select>
+          <input id="shareCustomExpiry" class="field customExpiry" type="datetime-local" aria-label="Custom access expiry" hidden>
         <input class="field" id="shareUser" autofocus placeholder="Search username">
         <div id="shareUsers"></div>
       </div>
     </div>`);
 
   const input=$("#shareUser");
+  $("#shareDuration").onchange=event=>{
+    $("#shareCustomExpiry").hidden=event.target.value!=="custom";
+  };
   let timer;
 
   input.oninput=()=>{
@@ -692,10 +1055,12 @@ async function findShareUsers(q) {
 }
 
 window.shareLibraryWith=async(receiverId,username)=>{
-  const duration=$("#shareDuration").value;
-  const expiresAt=duration==="forever"
-    ? null
-    : new Date(Date.now()+Number(duration)*24*60*60*1000).toISOString();
+  let expiresAt;
+  try {
+    expiresAt=shareExpiration($("#shareDuration").value,$("#shareCustomExpiry"));
+  } catch(error) {
+    return alert(error.message);
+  }
   const {error}=await supabaseClient.from("library_shares").upsert({
     sender_id:currentUser.id,
     receiver_id:receiverId,
@@ -1150,15 +1515,20 @@ async function boot() {
     console.error(e);
     const message=e.message||"Unknown startup error.";
     const code=e.code||"";
-    const needsLibraryMigration=code==="42P01" || code==="PGRST205"
-      || /library_shares/i.test(message);
+    const needsSocialMigration=/notifications|messages/i.test(message);
+    const needsLibraryMigration=!needsSocialMigration
+      && (code==="42P01" || code==="PGRST205" || /library_shares/i.test(message));
     const missingConfig=/environment variables are missing/i.test(message);
-    const heading=needsLibraryMigration
+    const heading=needsSocialMigration
+      ? "Finish the network setup."
+      : needsLibraryMigration
       ? "Finish the library-sharing setup."
       : missingConfig
         ? "Connect CineVault."
         : "CineVault could not start.";
-    const guidance=needsLibraryMigration
+    const guidance=needsSocialMigration
+      ? "Run <b>supabase/social_features.sql</b> in Supabase SQL Editor, then reload the app. This adds messaging, notifications, and their access policies."
+      : needsLibraryMigration
       ? "Run <b>supabase/library_sharing.sql</b> in Supabase SQL Editor, then reload the app. This adds the expiring library-sharing table and access function."
       : missingConfig
         ? "Add <b>SUPABASE_URL</b> and <b>SUPABASE_PUBLISHABLE_KEY</b> in Vercel, then redeploy. Add <b>TMDB_API_KEY</b> to enable movie search."
@@ -1169,7 +1539,7 @@ async function boot() {
         <div class="authBox">
           <div class="brand">
             <b>CINEVAULT</b>
-            <small>${needsLibraryMigration?"DATABASE MIGRATION REQUIRED":"SETUP REQUIRED"}</small>
+            <small>${needsSocialMigration||needsLibraryMigration?"DATABASE MIGRATION REQUIRED":"SETUP REQUIRED"}</small>
           </div>
           <h1>${heading}</h1>
           <p class="muted">${esc(message)}${code?` (${esc(code)})`:""}</p>
