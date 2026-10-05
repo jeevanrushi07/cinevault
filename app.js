@@ -52,6 +52,7 @@ let stageTrailerAudioEnabled = false;
 let youtubePlayerApiPromise = null;
 let archiveSearchScrollHandler = null;
 let archiveSearchCompressed = false;
+let archiveDecadeFilter = "";
 let headerSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[]};
 let addSearchState = {query:"",page:0,totalPages:1,loading:false,request:0,items:[]};
 let trailerReadMode = localStorage.getItem("cinevault-read-mode")==="true";
@@ -573,67 +574,114 @@ async function show(tab, q = "", options = {}) {
     });
   });
   const topGenres=[...genreCounts.values()].sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name)).slice(0,3);
-  const featuredMovie=allWatched[0]||null;
+  const featuredMovies=allWatched.slice(0,5);
+  const featuredMovie=featuredMovies[0]||null;
   const archiveName=profile?.username||currentUser?.email?.split("@")[0]||"cinephile";
-  const tasteCopy=topGenres.length
-    ? `Your archive leans toward ${topGenres.map(genre=>genre.name).join(", ")}.`
-    : allWatched.length
-      ? "Your collection is taking shape. Add genres to your titles to reveal your viewing patterns."
-      : "Every great collection starts with one story that stays with you.";
+  const decadeCounts=new Map();
+  const currentYear=new Date().getFullYear();
+  allWatched.forEach(movie=>{
+    const year=Number(movie.year);
+    if (!Number.isInteger(year)||year<1888||year>currentYear+1) return;
+    const decade=`${Math.floor(year/10)*10}s`;
+    decadeCounts.set(decade,(decadeCounts.get(decade)||0)+1);
+  });
+  const decades=[...decadeCounts.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}));
+  const collection=archiveDecadeFilter
+    ? watched.filter(movie=>Number.isInteger(Number(movie.year))&&`${Math.floor(Number(movie.year)/10)*10}s`===archiveDecadeFilter)
+    : watched;
 
   c.innerHTML = `
     <section class="archiveHero">
-      <div class="archiveHeroCopy">
-        <span class="archiveEyebrow"><i></i> YOUR ARCHIVE <b>/</b> @${esc(archiveName)}</span>
-        <h1>${allWatched.length?`A taste for<br><em>${esc(topGenres[0]?.name||"stories")}</em>.`:"Your next<br><em>favorite story</em>."}</h1>
-        <p>${esc(tasteCopy)}</p>
-        <div class="archiveMetrics" aria-label="Your library">
-          <div><strong>${allWatched.length}</strong><span>WATCHED</span></div>
-          <div><strong>${allWant.length}</strong><span>ON YOUR LIST</span></div>
-          <div><strong>${genreCounts.size}</strong><span>GENRES EXPLORED</span></div>
-        </div>
-        ${topGenres.length?`
-          <div class="archiveTaste">
-            <span>YOUR SIGNATURE</span>
-            <div>${topGenres.map(genre=>`<span>${esc(genre.name)}<b>${genre.count}</b></span>`).join("")}</div>
-          </div>`:""}
-      </div>
       ${featuredMovie?`
-        <button type="button" class="archiveFeature" data-id="${esc(featuredMovie.tmdbId)}" aria-label="Open ${esc(featuredMovie.title)}">
-          <img src="${img(featuredMovie.posterPath)}" alt="">
-          <span class="archiveFeatureShade"></span>
-          <span class="archiveFeatureLabel"><i></i> A STORY YOU KEPT</span>
-          <span class="archiveFeatureTitle">${esc(featuredMovie.title)}${featuredMovie.year?` <small>${esc(featuredMovie.year)}</small>`:""}</span>
-          <span class="archiveFeatureAction">OPEN FROM YOUR ARCHIVE <b>↗</b></span>
-        </button>`:`
-        <div class="archiveFeature archiveFeatureEmpty" aria-hidden="true">
-          <span class="archiveFeatureMark">CV</span>
-          <span class="archiveFeatureLabel">A SPACE FOR YOUR STORIES</span>
-          <span class="archiveFeatureAction">BUILT A TITLE AT A TIME</span>
-        </div>`}
+        <img class="archiveHeroArtwork" id="archiveHeroArtwork" src="${esc(backdrop(featuredMovie.backdropPath)||img(featuredMovie.posterPath))}" alt="">
+        <div class="archiveHeroShade"></div>
+        <div class="archiveHeroCopy">
+          <span class="archiveEyebrow"><i></i> @${esc(archiveName.toUpperCase())}’S SCREENING ROOM <b>/</b> RECENTLY KEPT</span>
+          <h1 id="archiveHeroTitle">${esc(featuredMovie.title)}</h1>
+          <div class="archiveHeroMeta" id="archiveHeroMeta">${[featuredMovie.year,...(featuredMovie.genres||[]).slice(0,2)].filter(Boolean).map(esc).join(" <i>·</i> ")}</div>
+          <p id="archiveHeroOverview">${esc(featuredMovie.overview||`A story from your ${topGenres[0]?.name||"personal"} collection.`)}</p>
+          <button type="button" class="archiveHeroOpen" id="archiveHeroOpen" data-id="${esc(featuredMovie.tmdbId)}">OPEN THIS TITLE <span>↗</span></button>
+        </div>
+        <div class="archiveHeroControls ${featuredMovies.length>1?"":"single"}" aria-label="Featured films">
+          <button type="button" id="archiveHeroPrevious" aria-label="Previous featured film">‹</button>
+          <div>${featuredMovies.map((movie,index)=>`<button type="button" class="archiveHeroDot ${index===0?"active":""}" data-feature-index="${index}" aria-label="Show ${esc(movie.title)}" aria-pressed="${index===0}"></button>`).join("")}</div>
+          <button type="button" id="archiveHeroNext" aria-label="Next featured film">›</button>
+        </div>
+      `:`
+        <div class="archiveHeroEmpty">
+          <span class="archiveEyebrow"><i></i> @${esc(archiveName.toUpperCase())}’S SCREENING ROOM</span>
+          <h1>Your story<br><em>starts here.</em></h1>
+          <p>Build a collection that feels like you. Save a film you love and this room will become your own.</p>
+          <button type="button" class="archiveHeroOpen" id="archiveHeroAdd">FIND YOUR FIRST FILM <span>＋</span></button>
+        </div>
+      `}
+    </section>
+    <section class="archivePulse" aria-label="Your collection at a glance">
+      <div><strong>${allWatched.length}</strong><span>STORIES WATCHED</span></div>
+      <div><strong>${allWant.length}</strong><span>UP NEXT</span></div>
+      <div><strong>${genreCounts.size}</strong><span>GENRES EXPLORED</span></div>
+      <div class="archiveTastePulse"><span>YOUR TASTE</span><strong>${topGenres.length?topGenres.map(genre=>esc(genre.name)).join(" <i>·</i> "):"Still unfolding"}</strong></div>
     </section>
     ${watchlist(want)}
+    <section class="archiveDecades" aria-label="Filter watched titles by decade">
+      <div><span>YOUR COLLECTION, BY ERA</span><p>Every decade has a different feeling.</p></div>
+      <div class="archiveDecadeList">
+        <button type="button" class="archiveDecade ${archiveDecadeFilter?"":"active"}" data-decade="" aria-pressed="${archiveDecadeFilter?"false":"true"}"><b>ALL</b><i>${allWatched.length}</i></button>
+        ${decades.map(([decade,count])=>`
+          <button type="button" class="archiveDecade ${archiveDecadeFilter===decade?"active":""}" data-decade="${decade}" aria-pressed="${archiveDecadeFilter===decade}">
+            <b>${decade}</b><i>${count}</i><span style="--decade-fill:${Math.max(12,Math.round(count/Math.max(...decades.map(([,value])=>value))*100))}%"></span>
+          </button>`).join("")}
+      </div>
+    </section>
     <div class="head archiveCollectionHead">
       <div>
-        <span>${q?"SEARCHING YOUR ARCHIVE":"THE STORIES THAT STAYED"}</span>
-        <h2>${q ? `Watched results for "${esc(q)}"` : "Your collection"}</h2>
+        <span>${q?"SEARCHING YOUR ARCHIVE":archiveDecadeFilter?`A CHAPTER FROM THE ${archiveDecadeFilter.toUpperCase()}`:"THE STORIES THAT STAYED"}</span>
+        <h2>${q ? `Watched results for "${esc(q)}"` : archiveDecadeFilter?`The ${archiveDecadeFilter}`:"Your collection"}</h2>
       </div>
-      <small>${watched.length} ${watched.length===1?"TITLE":"TITLES"}</small>
+      <small>${collection.length} ${collection.length===1?"TITLE":"TITLES"}</small>
     </div>
-    ${watched.length?`
+    ${collection.length?`
       <div class="wall archiveWall">
-        ${watched.map((m,i)=>poster(m,i,true)).join("")}
+        ${collection.map((m,i)=>poster(m,i,true)).join("")}
       </div>`:`
       <div class="archiveEmptyState">
-        <span>${q?"NO MATCHES IN THIS CHAPTER":"YOUR ARCHIVE BEGINS HERE"}</span>
-        <p>${q?"Try a different title, person, year, or genre.":"Save a film or series you love, and it will find its place here."}</p>
+        <span>${q?"NO MATCHES IN THIS CHAPTER":archiveDecadeFilter?"NO TITLES FROM THIS ERA YET":"YOUR ARCHIVE BEGINS HERE"}</span>
+        <p>${q?"Try a different title, person, year, or genre.":archiveDecadeFilter?"Choose another decade or add a title from this era.":"Save a film or series you love, and it will find its place here."}</p>
       </div>`}`;
 
-  document.querySelectorAll(".poster,.archiveFeature[data-id]").forEach(p => {
+  document.querySelectorAll(".poster,.archiveHeroOpen[data-id]").forEach(p => {
     p.onclick = () => stageFromCard(movies.find(m => String(m.tmdbId) === p.dataset.id),p);
     if (p.classList.contains("poster")) {
       p.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", p.dataset.id));
     }
+  });
+  $("#archiveHeroAdd")?.addEventListener("click",addModal);
+  const setFeaturedMovie=index=>{
+    if (!featuredMovies.length) return;
+    const selectedIndex=(index+featuredMovies.length)%featuredMovies.length;
+    const movie=featuredMovies[selectedIndex];
+    const artwork=$("#archiveHeroArtwork");
+    if (artwork) artwork.src=backdrop(movie.backdropPath)||img(movie.posterPath);
+    $("#archiveHeroTitle").textContent=movie.title;
+    $("#archiveHeroMeta").innerHTML=[movie.year,...(movie.genres||[]).slice(0,2)].filter(Boolean).map(value=>esc(value)).join(" <i>·</i> ");
+    $("#archiveHeroOverview").textContent=movie.overview||`A story from your ${topGenres[0]?.name||"personal"} collection.`;
+    $("#archiveHeroOpen").dataset.id=String(movie.tmdbId);
+    document.querySelectorAll(".archiveHeroDot").forEach((dot,dotIndex)=>{
+      const active=dotIndex===selectedIndex;
+      dot.classList.toggle("active",active);
+      dot.setAttribute("aria-pressed",String(active));
+    });
+  };
+  $("#archiveHeroPrevious")?.addEventListener("click",()=>setFeaturedMovie(featuredMovies.findIndex(movie=>String(movie.tmdbId)===$("#archiveHeroOpen")?.dataset.id)-1));
+  $("#archiveHeroNext")?.addEventListener("click",()=>setFeaturedMovie(featuredMovies.findIndex(movie=>String(movie.tmdbId)===$("#archiveHeroOpen")?.dataset.id)+1));
+  document.querySelectorAll(".archiveHeroDot").forEach(dot=>{
+    dot.addEventListener("click",()=>setFeaturedMovie(Number(dot.dataset.featureIndex)));
+  });
+  document.querySelectorAll(".archiveDecade").forEach(button=>{
+    button.addEventListener("click",()=>{
+      archiveDecadeFilter=button.dataset.decade||"";
+      show("archive",searchQuery,{history:false});
+    });
   });
   const watchTarget=document.querySelector(".vertical-watch");
   if (watchTarget) {
@@ -976,23 +1024,23 @@ function poster(m,i=0,mutual=false,readOnly=false,existingStatus="") {
 function watchlist(ms=movies.filter(m => m.status === "want")) {
 
   return `
-    <section class="watch vertical-watch"
+    <section class="watch vertical-watch archiveQueue"
       ondragover="event.preventDefault()"
       ondrop="dropWatch(event)">
-      <div>
-        <span>UP NEXT</span>
-        <b>Want to watch</b>
-        <small>Drag a poster here</small>
+      <div class="archiveQueueHead">
+        <div><span>THE NEXT SCREENING</span><b>Your watchlist</b></div>
+        <small>${ms.length} ${ms.length===1?"FILM":"FILMS"} QUEUED</small>
       </div>
-      ${
+      <div class="archiveQueueTrack">${
         ms.length
         ? ms.map(m=>`
-          <article data-id="${m.tmdbId}" onclick="stageById('${m.tmdbId}',this)">
-            <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
-            <b>${esc(m.title)}<small>${esc(m.year)}</small></b>
+          <article class="archiveQueueCard" data-id="${esc(m.tmdbId)}" onclick="stageById('${esc(m.tmdbId)}',this)">
+            <img src="${esc(img(m.posterPath))}" alt="" loading="lazy">
+            <span><b>${esc(m.title)}</b><small>${esc([m.year,...(m.genres||[]).slice(0,1)].filter(Boolean).join(" · "))}</small></span>
+            <i aria-hidden="true">↗</i>
           </article>`).join("")
-        : "<p>Drop a movie here to build your watchlist.</p>"
-      }
+        : `<div class="archiveQueueEmpty"><p>Your next favorite is still out there.</p><button type="button" onclick="addModal()">＋ FIND A FILM</button></div>`
+      }</div>
     </section>`;
 }
 
