@@ -344,9 +344,53 @@ async function restoreAppRoute(route) {
   await show(route.tab||"archive",route.routeParam||"",{history:false});
   if (route.detail?.type==="movie"&&route.detail.movie) {
     stage(route.detail.movie,Boolean(route.detail.readOnly),{history:false});
+  } else if (route.detail?.type==="movie"&&route.detail.id) {
+    const savedMovie=movies.find(movie=>String(movie.tmdbId)===String(route.detail.id));
+    if (savedMovie) {
+      stage(savedMovie,Boolean(route.detail.readOnly),{history:false});
+    } else {
+      try {
+        const params=new URLSearchParams({id:String(route.detail.id)});
+        const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
+        const movie=await readApiJson(response,"Movie details API");
+        if (!response.ok) throw new Error(movie.error||"Could not restore this movie.");
+        stage(movie,Boolean(route.detail.readOnly),{history:false});
+      } catch(error) {
+        const content=$("#content");
+        if (content) content.innerHTML=`<p class="personError">${esc(error.message||"Could not restore this movie.")}</p>`;
+      }
+    }
   } else if (route.detail?.type==="person"&&route.detail.id) {
     await renderPerson(route.detail.id);
   }
+}
+
+function initialAppRoute() {
+  const state=history.state;
+  if (state?.cineVaultRoute) return state;
+
+  const hash=new URLSearchParams(location.hash.slice(1));
+  const movieId=hash.get("movie");
+  if (movieId) {
+    return {
+      cineVaultRoute:true,
+      tab:"archive",
+      routeParam:"",
+      detail:{type:"movie",id:movieId}
+    };
+  }
+
+  const personId=hash.get("person");
+  if (personId) {
+    return {
+      cineVaultRoute:true,
+      tab:"archive",
+      routeParam:"",
+      detail:{type:"person",id:personId}
+    };
+  }
+
+  return {cineVaultRoute:true,tab:"archive",routeParam:"",detail:null};
 }
 
 function closeAppDetail() {
@@ -2130,8 +2174,12 @@ async function boot() {
       return;
     }
 
+    const route=initialAppRoute();
+    if (!history.state?.cineVaultRoute) {
+      history.replaceState({...history.state,...route},"",location.href);
+    }
     shell();
-    await show("archive");
+    await restoreAppRoute(route);
 
     supabaseClient.auth.onAuthStateChange(event=>{
       if (event==="SIGNED_OUT") location.reload();
