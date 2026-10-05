@@ -78,7 +78,20 @@ export default async function handler(req,res) {
       jobs:["Creator"]
     });
   }
-  const production=[...productionPeople.values()];
+  const productionPriority=person=>{
+    const jobs=person.jobs||[];
+    if (jobs.includes("Director")) return 0;
+    if (jobs.some(job=>["Music Director","Music","Original Music Composer","Composer","Music Supervisor"].includes(job))) return 1;
+    if (jobs.some(job=>["Producer","Executive Producer","Co-Producer","Associate Producer"].includes(job))) return 2;
+    if (jobs.includes("Creator")) return 3;
+    if (jobs.some(job=>["Writer","Screenplay","Story","Teleplay","Screenwriter"].includes(job))) return 4;
+    if (jobs.some(job=>["Director of Photography","Cinematography"].includes(job))) return 5;
+    if (jobs.some(job=>["Editor","Casting Director"].includes(job))) return 6;
+    if (jobs.some(job=>["Production Design","Art Direction","Costume Design"].includes(job))) return 7;
+    return 8;
+  };
+  const production=[...productionPeople.values()]
+    .sort((a,b)=>productionPriority(a)-productionPriority(b)||a.name.localeCompare(b.name));
   const directorDetails=production.find(person=>person.jobs.includes("Director"))||null;
   const trailer=(data.videos?.results||[]).find(video=>
     video.site==="YouTube"&&["Trailer","Teaser"].includes(video.type)
