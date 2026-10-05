@@ -577,7 +577,7 @@ async function show(tab, q = "", options = {}) {
       "",
       "Thank you,"
     ].join("\n");
-    const mailto=`mailto:jeevanrushicreations584@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const composeUrl=`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent("jeevanrushicreations584@gmail.com")}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     c.innerHTML=`
       <section class="contactPage">
         <div class="contactPageGlow" aria-hidden="true"></div>
@@ -590,16 +590,12 @@ async function show(tab, q = "", options = {}) {
           <span class="contactStatus"><i></i> DEVELOPER</span>
         </div>
         <div class="contactAction">
-          <a class="contactMailButton" href="${mailto}">
+          <a class="contactMailButton" href="${composeUrl}">
             <span><small>FOR A PROBLEM OR SUGGESTION</small><b>Email Jeevan</b></span>
             <span aria-hidden="true">↗</span>
           </a>
-          <div class="contactAddress">
-            <span>EMAIL</span>
-            <a href="${mailto}">jeevanrushicreations584@gmail.com</a>
-          </div>
         </div>
-        <p class="contactPrivacy">Your email app opens a draft addressed to Jeevan with a support subject and a few helpful prompts already filled in. Send it from your usual email account, and please don’t include passwords or private API keys.</p>
+        <p class="contactPrivacy">Gmail will open a prefilled draft addressed to Jeevan. Sign in if prompted, then review and send it. Please don’t include passwords or private API keys.</p>
       </section>`;
     return;
   }
