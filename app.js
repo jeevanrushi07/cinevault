@@ -22,6 +22,8 @@ let incomingShares = [];
 let outgoingShares = [];
 let activeTab = "archive";
 let searchQuery = "";
+let sharedLibraryTimer = null;
+let activeSharedShareId = null;
 
 function tmdbHeaders() {
   const key = localStorage.getItem("cinevault-tmdb-key");
@@ -114,10 +116,10 @@ async function loadData() {
     supabaseClient.from("profiles").select("*").eq("id", user.id).single(),
     supabaseClient.from("movies").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
     supabaseClient.from("characters").select("*").eq("user_id", user.id).order("created_at", {ascending:false}),
-    supabaseClient.from("shares").select(`
-      id,tmdb_id,movie_snapshot,created_at,sender_id,receiver_id,
-      sender:profiles!shares_sender_id_fkey(username),
-      receiver:profiles!shares_receiver_id_fkey(username)
+    supabaseClient.from("library_shares").select(`
+      id,created_at,expires_at,sender_id,receiver_id,
+      sender:profiles!library_shares_sender_id_fkey(username),
+      receiver:profiles!library_shares_receiver_id_fkey(username)
     `).or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order("created_at",{ascending:false})
   ]);
 
@@ -186,7 +188,7 @@ function shell() {
         </nav>
         <div class="side">
           <button id="add">＋ Add title</button>
-          <button id="share">⇧ Share movie</button>
+          <button id="share">⇧ Share library</button>
           <button id="profile">@${esc(profile?.username || "user")}</button>
           <button id="settings">⚙ Settings</button>
           <button id="logout">↪ Logout</button>
@@ -208,7 +210,7 @@ function shell() {
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => show(b.dataset.tab));
   $("#settings").onclick = settingsModal;
   $("#add").onclick = $("#addTop").onclick = addModal;
-  $("#share").onclick = shareMovieModal;
+  $("#share").onclick = shareLibraryModal;
   $("#profile").onclick = profileModal;
   $("#logout").onclick = logout;
   $("#search").oninput = e => {
@@ -218,6 +220,7 @@ function shell() {
 }
 
 async function show(tab, q = "") {
+  if (tab !== "sharedLibrary") stopSharedLibraryMonitor();
   activeTab = tab;
   const c = $("#content");
   if (!c) return;
@@ -234,8 +237,14 @@ async function show(tab, q = "") {
   }
 
   if (tab === "shared") {
-    c.innerHTML = '<p class="muted">Loading shared movies…</p>';
+    c.innerHTML = '<p class="muted">Loading shared libraries…</p>';
     c.innerHTML = await shared();
+    return;
+  }
+
+  if (tab === "sharedLibrary") {
+    c.innerHTML = '<p class="muted">Loading shared library…</p>';
+    await renderSharedLibrary(q);
     return;
   }
 
@@ -275,9 +284,9 @@ async function show(tab, q = "") {
   });
 }
 
-function poster(m,i=0,mutual=false) {
+function poster(m,i=0,mutual=false,readOnly=false) {
   return `
-    <article class="poster p${i%7} ${mutual?"mutual":""}" draggable="true" data-id="${m.tmdbId}">
+    <article class="poster p${i%7} ${mutual?"mutual":""}" draggable="${!readOnly}" data-id="${m.tmdbId}">
       <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
       <div class="shade">
         <small>${esc(m.year || "")}</small>
@@ -408,118 +417,214 @@ async function shared() {
   return `
     <section class="sharePage">
       <div class="head">
-        <div><span>SHARED WITH YOU</span><h2>Incoming movies</h2></div>
+        <div><span>SHARED WITH YOU</span><h2>Incoming libraries</h2></div>
         <small>${incoming.length} SHARES</small>
       </div>
+      <button class="primary" onclick="shareLibraryModal()">Share my library</button>
 
       ${
         incoming.length
         ? `<div class="shareList">
-          ${incoming.map(s=>{
-            const m=normalizeMovie(s.movie_snapshot);
-            return `
-              <article>
-                <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
-                <div>
-                  <b>${esc(m.title)}</b>
-                  <small>Shared by @${esc(s.sender?.username||"user")} · ${esc(m.year||"")}</small>
-                  <p>${esc(m.overview||"")}</p>
-                  <div class="actions">
-                    <button class="primary" onclick="saveShared('${s.id}')">＋ Save to my library</button>
-                    <button onclick='stage(${JSON.stringify(m).replace(/'/g,"&#39;")})'>Details</button>
-                  </div>
+          ${incoming.map(s=>`
+            <article class="libraryShareCard">
+              <div>
+                <b>@${esc(s.sender?.username||"user")}'s library</b>
+                <small>${shareExpiryText(s)} · Read-only access to watched and want-to-watch titles</small>
+                <div class="actions">
+                  ${shareIsActive(s)
+                    ? `<button class="primary" onclick="openSharedLibrary('${s.id}')">View library</button>`
+                    : '<span class="muted">Access ended</span>'}
+                  <button class="danger" onclick="leaveShare('${s.id}')">Remove access</button>
                 </div>
-              </article>`;
-          }).join("")}
+              </div>
+            </article>`).join("")}
         </div>`
-        : '<p class="muted">No one has shared a movie with you yet.</p>'
+        : '<p class="muted">No one has shared a library with you yet.</p>'
       }
 
       <div class="head" style="margin-top:40px">
-        <div><span>YOUR SHARES</span><h2>Sent to users</h2></div>
+        <div><span>YOUR SHARES</span><h2>Libraries shared with users</h2></div>
       </div>
 
       ${
         outgoing.length
         ? `<div class="shareList">
-          ${outgoing.map(s=>{
-            const m=normalizeMovie(s.movie_snapshot);
-            return `
-              <article>
-                <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
-                <div>
-                  <b>${esc(m.title)}</b>
-                  <small>Shared with @${esc(s.receiver?.username||"user")}</small>
-                  <div class="actions">
-                    <button class="danger" onclick="revokeShare('${s.id}')">Retrieve / revoke share</button>
-                  </div>
+          ${outgoing.map(s=>`
+            <article class="libraryShareCard">
+              <div>
+                <b>Your library → @${esc(s.receiver?.username||"user")}</b>
+                <small>${shareExpiryText(s)} · Watched and want-to-watch titles</small>
+                <div class="actions">
+                  ${shareIsActive(s)
+                    ? `<button class="danger" onclick="revokeShare('${s.id}')">Revoke access</button>`
+                    : '<span class="muted">Access ended</span>'}
                 </div>
-              </article>`;
-          }).join("")}
+              </div>
+            </article>`).join("")}
         </div>`
-        : '<p class="muted">You have not shared any movies yet.</p>'
+        : '<p class="muted">You have not shared your library yet.</p>'
       }
     </section>`;
 }
 
-window.saveShared = async id => {
-  const s = incomingShares.find(x=>x.id===id);
-  if (!s) return;
+function shareIsActive(share) {
+  return !share.expires_at || Date.parse(share.expires_at) > Date.now();
+}
 
-  try {
-    await saveMovie(normalizeMovie(s.movie_snapshot),"watched");
-    show("archive");
-  } catch(e) {
-    alert(e.message);
-  }
-};
+function shareExpiryText(share) {
+  if (!share.expires_at) return "Until revoked";
+  const date = new Date(share.expires_at);
+  const formatted = date.toLocaleString();
+  return shareIsActive(share) ? `Expires ${formatted}` : `Expired ${formatted}`;
+}
 
-window.revokeShare = async id => {
-  if (!confirm("Retrieve this shared movie? The recipient will no longer have access to the shared copy.")) return;
+function stopSharedLibraryMonitor() {
+  if (sharedLibraryTimer) clearInterval(sharedLibraryTimer);
+  sharedLibraryTimer = null;
+  activeSharedShareId = null;
+}
 
-  const {error} = await supabaseClient.from("shares")
-    .delete().eq("id",id).eq("sender_id",currentUser.id);
+async function renderSharedLibrary(shareId) {
+  activeSharedShareId = shareId;
+  const {data:share,error:shareError} = await supabaseClient.from("library_shares")
+    .select("id,sender_id,receiver_id,expires_at")
+    .eq("id",shareId)
+    .eq("receiver_id",currentUser.id)
+    .maybeSingle();
 
-  if (error) return alert(error.message);
+  if (activeTab!=="sharedLibrary" || activeSharedShareId!==shareId) return;
 
-  await loadData();
-  show("shared");
-};
-
-async function shareMovieModal(movieId) {
-  const movie = movieId
-    ? movies.find(m=>String(m.tmdbId)===String(movieId))
-    : null;
-
-  if (!movie) {
-    if (!movies.length) return alert("Add a movie first.");
-
-    document.body.insertAdjacentHTML("beforeend",`
-      <div class="modal" id="shareModal">
-        <div class="box">
-          <button class="x" onclick="$('#shareModal').remove()">×</button>
-          <span>SHARE A MOVIE</span>
-          <h2>Choose a movie.</h2>
-          <div id="shareMovieChoices">
-            ${movies.slice(0,30).map(m=>`
-              <button class="shareChoice" onclick="shareMovieModal('${m.tmdbId}')">
-                <img src="${img(m.posterPath)}">
-                <span>${esc(m.title)}</span>
-              </button>`).join("")}
-          </div>
-        </div>
-      </div>`);
+  if (shareError) {
+    $("#content").innerHTML=`<p class="muted">Could not verify library access: ${esc(shareError.message)}</p>`;
     return;
   }
 
-  document.querySelector("#shareModal")?.remove();
+  if (!share || !shareIsActive(share)) {
+    stopSharedLibraryMonitor();
+    try {
+      await loadData();
+    } catch (error) {
+      $("#content").innerHTML=`<p class="muted">The share is no longer available. Could not refresh shared libraries: ${esc(error.message)}</p>`;
+      return;
+    }
+    if (activeTab!=="sharedLibrary") return;
+    $("#content").innerHTML=`
+      <p class="muted">This library share has expired, been revoked, or is no longer available.</p>
+      <button class="primary" onclick="show('shared')">Back to shared libraries</button>`;
+    return;
+  }
 
+  const {data,error} = await supabaseClient.rpc("get_shared_library",{p_share_id:shareId});
+  if (activeTab!=="sharedLibrary" || activeSharedShareId!==shareId) return;
+  if (error) {
+    $("#content").innerHTML=`<p class="muted">Could not load the shared library: ${esc(error.message)}</p>`;
+    return;
+  }
+
+  const sharedMovies=(data||[]).map(normalizeMovie);
+  const watched=sharedMovies.filter(m=>m.status==="watched");
+  const want=sharedMovies.filter(m=>m.status==="want");
+  const owner=incomingShares.find(s=>s.id===shareId)?.sender?.username||"user";
+
+  $("#content").innerHTML=`
+    <section class="sharedLibrary">
+      <div class="head">
+        <div><span>READ-ONLY SHARED LIBRARY</span><h2>@${esc(owner)}'s collection</h2></div>
+        <button onclick="show('shared')">← All shared libraries</button>
+      </div>
+      <p class="muted">${shareExpiryText(share)} · ${watched.length} watched · ${want.length} want to watch</p>
+      <div class="head"><div><span>WATCHED</span><h2>Seen</h2></div><small>${watched.length} TITLES</small></div>
+      ${watched.length
+        ? `<div class="wall">${watched.map((m,i)=>poster(m,i,false,true)).join("")}</div>`
+        : '<p class="muted">No watched titles in this library.</p>'}
+      <div class="head"><div><span>UP NEXT</span><h2>Want to watch</h2></div><small>${want.length} TITLES</small></div>
+      ${want.length
+        ? `<div class="wall">${want.map((m,i)=>poster(m,i,false,true)).join("")}</div>`
+        : '<p class="muted">No titles in the want-to-watch list.</p>'}
+    </section>`;
+
+  document.querySelectorAll("#content .poster").forEach(card=>{
+    card.onclick=()=>stage(sharedMovies.find(m=>String(m.tmdbId)===card.dataset.id),true);
+  });
+
+  if (sharedLibraryTimer) clearInterval(sharedLibraryTimer);
+  sharedLibraryTimer=setInterval(()=>refreshSharedLibraryAccess(shareId),15000);
+}
+
+async function refreshSharedLibraryAccess(shareId) {
+  if (activeTab!=="sharedLibrary" || activeSharedShareId!==shareId) return;
+
+  const {data,error}=await supabaseClient.from("library_shares")
+    .select("id,expires_at")
+    .eq("id",shareId)
+    .eq("receiver_id",currentUser.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Could not refresh shared library access.",error);
+    stopSharedLibraryMonitor();
+    $("#content").innerHTML=`<p class="muted">Could not verify shared library access: ${esc(error.message)}</p>`;
+    return;
+  }
+
+  if (!data || !shareIsActive(data)) {
+    stopSharedLibraryMonitor();
+    $("#stage")?.remove();
+    try {
+      await loadData();
+    } catch (loadError) {
+      $("#content").innerHTML=`<p class="muted">Access ended. Could not refresh shared libraries: ${esc(loadError.message)}</p>`;
+      return;
+    }
+    show("shared");
+  }
+}
+
+window.openSharedLibrary=id=>show("sharedLibrary",id);
+
+window.leaveShare=async id=>{
+  if (!confirm("Remove this shared library from your account? You will lose access.")) return;
+
+  const {error}=await supabaseClient.from("library_shares")
+    .delete().eq("id",id).eq("receiver_id",currentUser.id);
+  if (error) return alert(error.message);
+  try {
+    await loadData();
+    show("shared");
+  } catch (loadError) {
+    alert(`Access was removed, but shared libraries could not be refreshed: ${loadError.message}`);
+  }
+};
+
+window.revokeShare=async id=>{
+  if (!confirm("Revoke this library share now? The recipient will immediately lose access.")) return;
+
+  const {error}=await supabaseClient.from("library_shares")
+    .delete().eq("id",id).eq("sender_id",currentUser.id);
+  if (error) return alert(error.message);
+  try {
+    await loadData();
+    show("shared");
+  } catch (loadError) {
+    alert(`Access was revoked, but shared libraries could not be refreshed: ${loadError.message}`);
+  }
+};
+
+function shareLibraryModal() {
   document.body.insertAdjacentHTML("beforeend",`
-    <div class="modal" id="shareUserModal">
+    <div class="modal" id="shareLibraryModal">
       <div class="box">
-        <button class="x" onclick="$('#shareUserModal').remove()">×</button>
-        <span>SHARE ${esc(movie.title).toUpperCase()}</span>
-        <h2>Find a CineVault user.</h2>
+        <button class="x" onclick="$('#shareLibraryModal').remove()">×</button>
+        <span>SHARE YOUR CINEVAULT</span>
+        <h2>Share your whole library.</h2>
+        <p>Recipients can view your watched and want-to-watch lists. They cannot change your library.</p>
+        <label class="shareExpiryLabel" for="shareDuration">ACCESS FOR</label>
+        <select id="shareDuration" class="field shareDuration">
+          <option value="1">1 day</option>
+          <option value="7">1 week</option>
+          <option value="30">1 month</option>
+          <option value="forever">Until I revoke access</option>
+        </select>
         <input class="field" id="shareUser" autofocus placeholder="Search username">
         <div id="shareUsers"></div>
       </div>
@@ -530,11 +635,11 @@ async function shareMovieModal(movieId) {
 
   input.oninput=()=>{
     clearTimeout(timer);
-    timer=setTimeout(()=>findShareUsers(input.value,movie),250);
+    timer=setTimeout(()=>findShareUsers(input.value),250);
   };
 }
 
-async function findShareUsers(q,movie) {
+async function findShareUsers(q) {
   if (q.trim().length<2) {
     $("#shareUsers").innerHTML="";
     return;
@@ -547,34 +652,39 @@ async function findShareUsers(q,movie) {
     .limit(20);
 
   if (error) {
-    $("#shareUsers").innerHTML='<p class="muted">Could not search users.</p>';
+    $("#shareUsers").innerHTML=`<p class="muted">Could not search users: ${esc(error.message)}</p>`;
     return;
   }
 
   $("#shareUsers").innerHTML=(data||[]).map(u=>`
     <div class="userRow">
       <b>@${esc(u.username)}</b>
-      <button class="primary" onclick="sendShare('${u.id}','${esc(u.username)}','${movie.tmdbId}')">Share</button>
+      <button class="primary" onclick="shareLibraryWith('${u.id}','${esc(u.username)}')">Share library</button>
     </div>`).join("") || '<p class="muted">No users found.</p>';
 }
 
-window.sendShare=async(receiverId,username,id)=>{
-  const movie=movies.find(m=>String(m.tmdbId)===String(id));
-  if (!movie) return;
-
-  const {error}=await supabaseClient.from("shares").upsert({
+window.shareLibraryWith=async(receiverId,username)=>{
+  const duration=$("#shareDuration").value;
+  const expiresAt=duration==="forever"
+    ? null
+    : new Date(Date.now()+Number(duration)*24*60*60*1000).toISOString();
+  const {error}=await supabaseClient.from("library_shares").upsert({
     sender_id:currentUser.id,
     receiver_id:receiverId,
-    tmdb_id:Number(movie.tmdbId),
-    movie_snapshot:movieRow(movie)
-  },{onConflict:"sender_id,receiver_id,tmdb_id"});
+    created_at:new Date().toISOString(),
+    expires_at:expiresAt
+  },{onConflict:"sender_id,receiver_id"});
 
   if (error) return alert(error.message);
 
-  $("#shareUserModal")?.remove();
-  alert(`Shared with @${username}.`);
-  await loadData();
-  show("shared");
+  $("#shareLibraryModal")?.remove();
+  alert(`Your library is shared with @${username}.`);
+  try {
+    await loadData();
+    show("shared");
+  } catch (loadError) {
+    alert(`Library sharing succeeded, but shared libraries could not be refreshed: ${loadError.message}`);
+  }
 };
 
 function authModal(message="") {
@@ -766,7 +876,7 @@ async function choose(r,status="watched") {
   }
 }
 
-function stage(m) {
+function stage(m,readOnly=false) {
   if (!m) return;
 
   $("#stage")?.remove();
@@ -802,27 +912,28 @@ function stage(m) {
               <span><b>CAST</b>${esc((m.cast||[]).slice(0,7).join(", ")||"—")}</span>
             </div>
 
-            <label>
-              WHAT YOU WANT TO SAY
-              <textarea id="note">${esc(m.personalNote||"")}</textarea>
-            </label>
+            ${readOnly ? "" : `
+              <label>
+                WHAT YOU WANT TO SAY
+                <textarea id="note">${esc(m.personalNote||"")}</textarea>
+              </label>`}
 
             <div class="actions">
               <a class="primary" target="_blank" rel="noopener" href="${trailerUrl}">▶ Trailer</a>
-              ${
+              ${readOnly ? "" : `
+                ${
                 m.status==="want"
                 ? `<button onclick="markWatched('${m.tmdbId}')">✓ Mark watched</button>`
                 : `<button onclick="want('${m.tmdbId}')">＋ Want to watch</button>`
-              }
-              <button onclick="shareMovieModal('${m.tmdbId}')">⇧ Share</button>
-              <button class="danger" onclick="deleteMovie('${m.tmdbId}')">Delete</button>
+                }
+                <button class="danger" onclick="deleteMovie('${m.tmdbId}')">Delete</button>`}
             </div>
           </div>
         </div>
       </div>
     </div>`);
 
-  $("#note").onblur=async e=>{
+  if (!readOnly) $("#note").onblur=async e=>{
     try {
       await updateMovie(m,{personal_note:e.target.value});
     } catch(err) {

@@ -15,6 +15,8 @@ Supabase Auth internally requires an email-style identifier, so the server creat
 3. Ensure Email provider is enabled under Authentication -> Providers.
 4. Email confirmation does not need to be enabled because the server creates confirmed internal Auth users.
 
+For an existing CineVault database, run `supabase/library_sharing.sql` in Supabase SQL Editor to add expiring library sharing. Existing per-movie shares are not converted automatically.
+
 ## Vercel environment variables
 
 Set these in Vercel Project Settings -> Environment Variables:
@@ -42,9 +44,9 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - Movie details, cast, director, trailer and metadata
 - Personal movie notes
 - Search across title/cast/director/genre/year
-- User search and movie sharing
-- Incoming and outgoing shares
-- Retrieve/revoke shares
+- Read-only sharing of watched and want-to-watch libraries
+- 1-day, 1-week, 1-month, or until-revoked sharing
+- Incoming and outgoing library shares with immediate revocation
 - Character collection
 - Supabase Row Level Security
 - Persistent data across devices
