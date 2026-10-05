@@ -31,6 +31,7 @@ let activeChatUser = null;
 let chatRefreshTimer = null;
 let notificationRefreshTimer = null;
 let activeStageMovie = null;
+const copyFeedbackTimers = new WeakMap();
 
 function personPageUrl(person) {
   return person?.id?`#person=${encodeURIComponent(person.id)}`:"";
@@ -1021,7 +1022,7 @@ function renderCredits(movie) {
       ${personPageUrl(person)?'</a>':"</span>"}
       <span class="creditPersonHeading">
         <a class="creditPersonSearch" href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Crew member")}" target="_blank" rel="noopener">${esc(person.name||"Crew member")}</a>
-        <button type="button" class="copyPersonName copyPersonCompact" data-copy-name="${esc(person.name||"Crew member")}" aria-label="Copy ${esc(person.name||"Crew member")}'s name" title="Copy name">▢</button>
+        <button type="button" class="copyPersonName copyPersonCompact" data-copy-name="${esc(person.name||"Crew member")}" aria-label="Copy ${esc(person.name||"Crew member")}'s name" title="Copy name"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
       </span>
       <div class="creditTags">${(person.jobs||[]).map(job=>`<span class="creditTag">${esc(job)}</span>`).join("")}</div>
       ${person.character?`<small>${esc(person.character)}</small>`:""}
@@ -1156,7 +1157,7 @@ async function renderPerson(id) {
             <p class="muted">${esc(person.knownForDepartment||"FILM & TELEVISION")}</p>
             <div class="personTitleRow">
               <h1 class="personTitle"><a href="https://www.google.com/search?q=${encodeURIComponent(person.name||"Unknown person")}" target="_blank" rel="noopener">${esc(person.name||"Unknown person")}</a></h1>
-              <button type="button" class="copyPersonName personTitleCopy" data-copy-name="${esc(person.name||"Unknown person")}" aria-label="Copy ${esc(person.name||"Unknown person")}'s name" title="Copy name">▢</button>
+              <button type="button" class="copyPersonName personTitleCopy" data-copy-name="${esc(person.name||"Unknown person")}" aria-label="Copy ${esc(person.name||"Unknown person")}'s name" title="Copy name"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
             </div>
             <div class="personMeta">
               ${person.birthday?`<span>Born ${esc(person.birthday)}${age!==""?` · ${age} years old`:""}</span>`:""}
@@ -1910,7 +1911,7 @@ function stage(m,readOnly=false,options={}) {
             <span>${(m.type||"movie").toUpperCase()}</span>
             <div class="stageTitleRow">
               <h1><a class="movieSearchLink" target="_blank" rel="noopener" href="${movieSearchUrl}">${esc(m.title)}</a></h1>
-              <button type="button" class="copyMovieTitle" aria-label="Copy movie title" title="Copy movie title">▢</button>
+              <button type="button" class="copyMovieTitle" aria-label="Copy movie title" title="Copy movie title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
             </div>
             ${m.year?`<span class="movieYear">${esc(m.year)}</span>`:""}
 
@@ -1960,7 +1961,7 @@ function stage(m,readOnly=false,options={}) {
     }
   };
   refreshStageCredits(m);
-  $("#stage .copyMovieTitle").onclick=copyMovieTitle;
+  $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
 
   if (!readOnly) $("#note").onblur=async e=>{
     try {
@@ -1971,19 +1972,11 @@ function stage(m,readOnly=false,options={}) {
   };
 }
 
-async function copyMovieTitle() {
-  if (!activeStageMovie?.title) return;
+async function copyMovieTitle(button) {
+  if (!activeStageMovie?.title||!button) return;
   try {
     await navigator.clipboard.writeText(activeStageMovie.title);
-    const button=$("#stage .copyMovieTitle");
-    if (!button) return;
-    button.textContent="✓ Copied";
-    button.setAttribute("aria-label","Movie title copied");
-    setTimeout(()=>{
-      if (!button.isConnected) return;
-      button.textContent="▢ Copy title";
-      button.setAttribute("aria-label","Copy movie title");
-    },1600);
+    showCopyFeedback(button);
   } catch(error) {
     console.error("Could not copy movie title to clipboard.",error);
     alert("Could not copy the movie title. Check clipboard permissions and try again.");
@@ -1995,18 +1988,23 @@ async function copyPersonName(button) {
   if (!name) return;
   try {
     await navigator.clipboard.writeText(name);
-    const original=button.textContent;
-    button.textContent="✓ Copied";
-    button.setAttribute("aria-label","Person name copied");
-    setTimeout(()=>{
-      if (!button.isConnected) return;
-      button.textContent=original;
-      button.setAttribute("aria-label",`Copy ${name}'s name`);
-    },1600);
+    showCopyFeedback(button);
   } catch(error) {
     console.error("Could not copy person name to clipboard.",error);
     alert("Could not copy the name. Check clipboard permissions and try again.");
   }
+}
+
+function showCopyFeedback(button) {
+  const previousTimer=copyFeedbackTimers.get(button);
+  if (previousTimer) clearTimeout(previousTimer);
+  button.classList.remove("copyFeedbackVisible");
+  void button.offsetWidth;
+  button.classList.add("copyFeedbackVisible");
+  copyFeedbackTimers.set(button,setTimeout(()=>{
+    button.classList.remove("copyFeedbackVisible");
+    copyFeedbackTimers.delete(button);
+  },2000));
 }
 
 function navigateStageMovie(direction) {
