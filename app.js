@@ -626,8 +626,7 @@ async function show(tab, q = "", options = {}) {
     });
   });
   const topGenres=[...genreCounts.values()].sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name)).slice(0,3);
-  const featuredMovies=allWatched.slice(0,5);
-  const featuredMovie=featuredMovies[0]||null;
+  const featuredMovie=allWatched[0]||null;
   const archiveName=profile?.username||currentUser?.email?.split("@")[0]||"cinephile";
   const decadeCounts=new Map();
   const currentYear=new Date().getFullYear();
@@ -654,11 +653,6 @@ async function show(tab, q = "", options = {}) {
           <p id="archiveHeroOverview">${esc(featuredMovie.overview||`A story from your ${topGenres[0]?.name||"personal"} collection.`)}</p>
           <button type="button" class="archiveHeroOpen" id="archiveHeroOpen" data-id="${esc(featuredMovie.tmdbId)}">OPEN THIS TITLE <span>↗</span></button>
         </div>
-        <div class="archiveHeroControls ${featuredMovies.length>1?"":"single"}" aria-label="Featured films">
-          <button type="button" id="archiveHeroPrevious" aria-label="Previous featured film">‹</button>
-          <div>${featuredMovies.map((movie,index)=>`<button type="button" class="archiveHeroDot ${index===0?"active":""}" data-feature-index="${index}" aria-label="Show ${esc(movie.title)}" aria-pressed="${index===0}"></button>`).join("")}</div>
-          <button type="button" id="archiveHeroNext" aria-label="Next featured film">›</button>
-        </div>
       `:`
         <div class="archiveHeroEmpty">
           <span class="archiveEyebrow"><i></i> @${esc(archiveName.toUpperCase())}’S SCREENING ROOM</span>
@@ -677,14 +671,14 @@ async function show(tab, q = "", options = {}) {
     ${watchlist(want)}
     <section class="archiveRecommendations" aria-labelledby="archiveRecommendationsTitle">
       <div class="archiveRecommendationsHead">
-        <div><span>SELECTED FOR YOUR NEXT SCREENING</span><h2 id="archiveRecommendationsTitle">Because you watched these.</h2></div>
+        <div><span>SELECTED FROM YOUR TASTE</span><h2 id="archiveRecommendationsTitle">For your next screening.</h2><p>Inspired by what you’ve watched and what’s waiting in your watchlist.</p></div>
         <div class="archiveRailControls">
           <button type="button" data-recommendation-scroll="-1" aria-label="Scroll recommendations left">‹</button>
           <button type="button" data-recommendation-scroll="1" aria-label="Scroll recommendations right">›</button>
         </div>
       </div>
       <div class="archiveRecommendationRail" id="archiveRecommendationRail" aria-live="polite">
-        <p class="archiveRecommendationStatus">Finding titles shaped by your watched collection…</p>
+        <p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>
       </div>
     </section>
     <section class="archiveDecades" aria-label="Filter watched titles by decade">
@@ -736,28 +730,7 @@ async function show(tab, q = "", options = {}) {
       });
     });
   });
-  loadArchiveRecommendations(allWatched);
-  const setFeaturedMovie=index=>{
-    if (!featuredMovies.length) return;
-    const selectedIndex=(index+featuredMovies.length)%featuredMovies.length;
-    const movie=featuredMovies[selectedIndex];
-    const artwork=$("#archiveHeroArtwork");
-    if (artwork) artwork.src=backdrop(movie.backdropPath)||img(movie.posterPath);
-    $("#archiveHeroTitle").textContent=movie.title;
-    $("#archiveHeroMeta").innerHTML=[movie.year,...(movie.genres||[]).slice(0,2)].filter(Boolean).map(value=>esc(value)).join(" <i>·</i> ");
-    $("#archiveHeroOverview").textContent=movie.overview||`A story from your ${topGenres[0]?.name||"personal"} collection.`;
-    $("#archiveHeroOpen").dataset.id=String(movie.tmdbId);
-    document.querySelectorAll(".archiveHeroDot").forEach((dot,dotIndex)=>{
-      const active=dotIndex===selectedIndex;
-      dot.classList.toggle("active",active);
-      dot.setAttribute("aria-pressed",String(active));
-    });
-  };
-  $("#archiveHeroPrevious")?.addEventListener("click",()=>setFeaturedMovie(featuredMovies.findIndex(movie=>String(movie.tmdbId)===$("#archiveHeroOpen")?.dataset.id)-1));
-  $("#archiveHeroNext")?.addEventListener("click",()=>setFeaturedMovie(featuredMovies.findIndex(movie=>String(movie.tmdbId)===$("#archiveHeroOpen")?.dataset.id)+1));
-  document.querySelectorAll(".archiveHeroDot").forEach(dot=>{
-    dot.addEventListener("click",()=>setFeaturedMovie(Number(dot.dataset.featureIndex)));
-  });
+  loadArchiveRecommendations([...allWatched,...allWant]);
   document.querySelectorAll(".archiveDecade").forEach(button=>{
     button.addEventListener("click",()=>{
       archiveDecadeFilter=button.dataset.decade||"";
@@ -783,12 +756,12 @@ async function show(tab, q = "", options = {}) {
   focusArchiveSearch();
 }
 
-async function loadArchiveRecommendations(watchedMovies) {
+async function loadArchiveRecommendations(libraryMovies) {
   const rail=$("#archiveRecommendationRail");
   if (!rail) return;
   const request=++archiveRecommendationRequest;
-  if (!watchedMovies.length) {
-    rail.innerHTML='<p class="archiveRecommendationStatus">Mark a title as watched and CineVault will find recommendations based on your taste.</p>';
+  if (!libraryMovies.length) {
+    rail.innerHTML='<p class="archiveRecommendationStatus">Add a title to your collection or watchlist and CineVault will find recommendations based on your taste.</p>';
     return;
   }
   if (!tmdbReady()) {
@@ -796,13 +769,14 @@ async function loadArchiveRecommendations(watchedMovies) {
     return;
   }
 
-  rail.innerHTML='<p class="archiveRecommendationStatus">Finding titles shaped by your watched collection…</p>';
-  const types=[...new Set(watchedMovies.map(movie=>movie.type==="series"?"series":"movie"))];
+  rail.innerHTML='<p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>';
+  const types=[...new Set(libraryMovies.map(movie=>movie.type==="series"?"series":"movie"))];
   const requests=types.map(async type=>{
-    const seedIds=watchedMovies
-      .filter(movie=>(movie.type==="series"?"series":"movie")===type)
-      .slice(0,5)
-      .map(movie=>String(movie.tmdbId));
+    const matchingType=libraryMovies.filter(movie=>(movie.type==="series"?"series":"movie")===type);
+    const watchedSeeds=matchingType.filter(movie=>movie.status==="watched").slice(0,3);
+    const watchlistSeeds=matchingType.filter(movie=>movie.status==="want").slice(0,2);
+    const seedIds=[...new Set([...watchedSeeds,...watchlistSeeds].map(movie=>String(movie.tmdbId)))];
+    if (!seedIds.length) return [];
     const params=new URLSearchParams({ids:seedIds.join(","),type});
     const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
     const result=await readApiJson(response,"TMDB recommendations API");
@@ -825,7 +799,7 @@ async function loadArchiveRecommendations(watchedMovies) {
   if (!recommendations.length) {
     rail.innerHTML=errors.length
       ? `<p class="archiveRecommendationStatus">Could not load recommendations: ${esc(errors.join(" "))}</p>`
-      : '<p class="archiveRecommendationStatus">No new recommendations right now. Add more titles to your watched collection and check back.</p>';
+      : '<p class="archiveRecommendationStatus">No new recommendations right now. Add more films or series to your collection and watchlist, then check back.</p>';
     return;
   }
 
@@ -839,21 +813,29 @@ async function loadArchiveRecommendations(watchedMovies) {
       <div class="archiveRecommendationInfo">
         <strong>${esc(recommendation.title||"Untitled")}</strong>
         ${recommendation.tmdbRating?`<small>TMDB ${Number(recommendation.tmdbRating).toFixed(1)}</small>`:""}
-        <button type="button" class="archiveRecommendationAdd" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}">＋ ADD TO WATCHLIST</button>
+        <div class="archiveRecommendationActions">
+          <button type="button" class="archiveRecommendationAdd" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}" data-status="want">＋ WATCHLIST</button>
+          <button type="button" class="archiveRecommendationAdd archiveRecommendationCollect" data-id="${esc(recommendation.id)}" data-type="${esc(recommendation.type)}" data-status="watched">＋ COLLECTION</button>
+        </div>
       </div>
     </article>`).join("")+(errors.length?`<p class="archiveRecommendationError">${esc(errors.join(" "))}</p>`:"");
 
   rail.querySelectorAll(".archiveRecommendationAdd").forEach(button=>{
-    button.addEventListener("click",()=>addRecommendedTitle(button));
+    button.addEventListener("click",()=>addRecommendedTitle(button,button.dataset.status));
   });
 }
 
-async function addRecommendedTitle(button) {
+async function addRecommendedTitle(button,status) {
   const id=button.dataset.id;
   const type=button.dataset.type==="series"?"series":"movie";
+  const targetStatus=status==="watched"?"watched":"want";
   if (!id) return;
-  button.disabled=true;
-  button.textContent="ADDING…";
+  const card=button.closest(".archiveRecommendationCard");
+  const actionButtons=card?.querySelectorAll(".archiveRecommendationAdd")||[button];
+  actionButtons.forEach(action=>{
+    action.disabled=true;
+    if (action===button) action.textContent="ADDING…";
+  });
   try {
     const params=new URLSearchParams({id,type});
     const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
@@ -868,16 +850,18 @@ async function addRecommendedTitle(button) {
       backdropPath:details.backdropPath||"",
       genres:Array.isArray(details.genres)?details.genres:[],
       cast:details.cast||[],
-      status:"want"
+      status:targetStatus
     };
-    await saveMovie(movie,"want");
+    await saveMovie(movie,targetStatus);
     archiveDecadeFilter="";
     await show("archive",searchQuery,{history:false});
   } catch(error) {
-    console.error("Could not add TMDB recommendation to watchlist.",error);
-    button.disabled=false;
-    button.textContent="＋ ADD TO WATCHLIST";
-    alert(error.message||"Could not add this recommendation to your watchlist.");
+    console.error(`Could not add TMDB recommendation to ${targetStatus==="watched"?"the collection":"the watchlist"}.`,error);
+    actionButtons.forEach(action=>{
+      action.disabled=false;
+      action.textContent=action.dataset.status==="watched"?"＋ COLLECTION":"＋ WATCHLIST";
+    });
+    alert(error.message||`Could not add this recommendation to ${targetStatus==="watched"?"your collection":"your watchlist"}.`);
   }
 }
 
