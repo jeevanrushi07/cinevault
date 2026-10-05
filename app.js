@@ -39,6 +39,16 @@ function tmdbReady() {
   return Boolean(localStorage.getItem("cinevault-tmdb-key") || config?.tmdbConfigured);
 }
 
+async function readApiJson(response,source) {
+  const body=await response.text();
+  try {
+    return JSON.parse(body);
+  } catch {
+    const excerpt=body.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,180);
+    throw new Error(`${source} returned a non-JSON response (HTTP ${response.status})${excerpt?`: ${excerpt}`:"."}`);
+  }
+}
+
 function movieRow(m) {
   return {
     user_id: currentUser.id,
@@ -878,8 +888,9 @@ async function refreshStageCredits(movie) {
   }
   try {
     const type=movie.type==="series"?"series":"movie";
-    const response=await fetch(`/api/movie/${encodeURIComponent(movie.tmdbId)}?type=${type}`,{headers:tmdbHeaders()});
-    const details=await response.json();
+    const params=new URLSearchParams({id:String(movie.tmdbId),type});
+    const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
+    const details=await readApiJson(response,"Movie details API");
     if (!response.ok) throw new Error(details.error||"TMDB could not load cast and crew.");
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
@@ -1481,8 +1492,9 @@ async function searchHeaderTitles(query) {
 async function choose(r,status="watched") {
   try {
     const type=r.media_type==="tv"?"series":"movie";
-    const rr=await fetch(`/api/movie/${encodeURIComponent(r.id)}?type=${type}`,{headers:tmdbHeaders()});
-    let x=rr.ok ? await rr.json() : null;
+    const params=new URLSearchParams({id:String(r.id),type});
+    const rr=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
+    let x=rr.ok ? await readApiJson(rr,"Movie details API") : null;
 
     if (!x) {
       x={

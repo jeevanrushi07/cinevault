@@ -1,3 +1,13 @@
+async function readServiceJson(response,service) {
+  const body=await response.text();
+  try {
+    return JSON.parse(body);
+  } catch {
+    const excerpt=body.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,180);
+    throw new Error(`${service} returned a non-JSON response (HTTP ${response.status})${excerpt?`: ${excerpt}`:"."}`);
+  }
+}
+
 export default async function handler(req,res) {
   const id=req.query?.id||req.url.split("?")[0].split("/").pop();
   const key=process.env.TMDB_API_KEY||req.headers["x-tmdb-api-key"];
@@ -15,7 +25,7 @@ export default async function handler(req,res) {
   try {
     for (const endpoint of endpoints) {
       response=await fetch(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(id)}?api_key=${encodeURIComponent(key)}&append_to_response=credits,videos,external_ids`);
-      data=await response.json();
+      data=await readServiceJson(response,"TMDB");
       if (response.ok) {
         type=endpoint==="tv"?"series":"movie";
         break;
@@ -23,7 +33,7 @@ export default async function handler(req,res) {
     }
   } catch (error) {
     console.error("TMDB movie detail lookup failed:",error);
-    return res.status(502).json({error:"Could not reach TMDB for movie details."});
+    return res.status(502).json({error:error.message||"Could not reach TMDB for movie details."});
   }
 
   if (!response?.ok) {
@@ -57,7 +67,7 @@ export default async function handler(req,res) {
   if (imdbId&&omdbKey) {
     try {
       const ratingResponse=await fetch(`https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(omdbKey)}`);
-      const ratingData=await ratingResponse.json();
+      const ratingData=await readServiceJson(ratingResponse,"OMDb");
       if (ratingResponse.ok&&ratingData.Response!=="False"&&ratingData.imdbRating&&ratingData.imdbRating!=="N/A") {
         imdbRating=ratingData.imdbRating;
       } else {
@@ -65,7 +75,7 @@ export default async function handler(req,res) {
       }
     } catch (error) {
       console.error("IMDb rating lookup failed:",error);
-      imdbRatingError="Could not load the IMDb rating.";
+      imdbRatingError=error.message||"Could not load the IMDb rating.";
     }
   }
 
