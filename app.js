@@ -36,8 +36,12 @@ let stageTrailerPlayer = null;
 let stageTrailerIdleTimer = null;
 let stageTrailerPointerHandler = null;
 let stageTrailerScrollHandler = null;
+let stageTrailerVisibilityHandler = null;
+let stageTrailerWindowBlurHandler = null;
+let stageTrailerWindowFocusHandler = null;
 let stageTrailerGeneration = 0;
 let stageTrailerIsIdle = false;
+let stageTrailerPageActive = !document.hidden&&document.hasFocus();
 let stageTrailerContentTimer = null;
 let stageTrailerVideoId = "";
 let stageTrailerCandidates = [];
@@ -2292,6 +2296,18 @@ function stopStageTrailer() {
     document.removeEventListener("scroll",stageTrailerScrollHandler,true);
     stageTrailerScrollHandler=null;
   }
+  if (stageTrailerVisibilityHandler) {
+    document.removeEventListener("visibilitychange",stageTrailerVisibilityHandler);
+    stageTrailerVisibilityHandler=null;
+  }
+  if (stageTrailerWindowBlurHandler) {
+    window.removeEventListener("blur",stageTrailerWindowBlurHandler);
+    stageTrailerWindowBlurHandler=null;
+  }
+  if (stageTrailerWindowFocusHandler) {
+    window.removeEventListener("focus",stageTrailerWindowFocusHandler);
+    stageTrailerWindowFocusHandler=null;
+  }
   stageTrailerIsIdle=false;
   clearTimeout(stageTrailerContentTimer);
   stageTrailerContentTimer=null;
@@ -2326,11 +2342,21 @@ function setupStageTrailer(videoId,movie=activeStageMovie) {
   stageTrailerScrollHandler=()=>stageTrailerActivity();
   document.addEventListener("pointermove",stageTrailerPointerHandler,{passive:true});
   document.addEventListener("scroll",stageTrailerScrollHandler,{capture:true,passive:true});
+  stageTrailerVisibilityHandler=()=>{
+    if (document.hidden) pauseStageTrailerForInactivePage();
+    else resumeStageTrailerForActivePage();
+  };
+  stageTrailerWindowBlurHandler=()=>pauseStageTrailerForInactivePage();
+  stageTrailerWindowFocusHandler=()=>resumeStageTrailerForActivePage();
+  document.addEventListener("visibilitychange",stageTrailerVisibilityHandler);
+  window.addEventListener("blur",stageTrailerWindowBlurHandler);
+  window.addEventListener("focus",stageTrailerWindowFocusHandler);
   scheduleStageTrailer(generation);
 }
 
 function scheduleStageTrailer(generation=stageTrailerGeneration) {
   clearTimeout(stageTrailerIdleTimer);
+  if (!stageTrailerPageActive||document.hidden) return;
   stageTrailerIdleTimer=setTimeout(()=>startStageTrailerAfterIdle(generation),5000);
 }
 
@@ -2470,6 +2496,7 @@ function showStageTrailerFallback(message="") {
 
 function stageTrailerActivity() {
   if (trailerReadMode||!stageTrailerPointerHandler) return;
+  if (!stageTrailerPageActive||document.hidden) return;
   stageTrailerIsIdle=false;
   clearTimeout(stageTrailerIdleTimer);
   clearTimeout(stageTrailerContentTimer);
@@ -2477,6 +2504,24 @@ function stageTrailerActivity() {
   $("#stage")?.classList.remove("trailerVisible");
   $("#stage")?.classList.remove("trailerContentHidden");
   if (stageTrailerPlayer) stageTrailerPlayer.pauseVideo();
+  scheduleStageTrailer();
+}
+
+function pauseStageTrailerForInactivePage() {
+  stageTrailerPageActive=false;
+  stageTrailerIsIdle=false;
+  clearTimeout(stageTrailerIdleTimer);
+  stageTrailerIdleTimer=null;
+  clearTimeout(stageTrailerContentTimer);
+  stageTrailerContentTimer=null;
+  $("#stage")?.classList.remove("trailerVisible","trailerContentHidden");
+  stageTrailerPlayer?.pauseVideo();
+}
+
+function resumeStageTrailerForActivePage() {
+  if (document.hidden||trailerReadMode||!stageTrailerPointerHandler) return;
+  stageTrailerPageActive=true;
+  stageTrailerIsIdle=false;
   scheduleStageTrailer();
 }
 
