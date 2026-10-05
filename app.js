@@ -815,12 +815,12 @@ async function loadArchiveRecommendations(libraryMovies) {
   const typeLabels={movie:"FILM",series:"SERIES"};
   rail.innerHTML=recommendations.map(recommendation=>`
     <article class="archiveRecommendationCard" data-recommendation-item>
-      <button type="button" class="archiveRecommendationPoster archiveRecommendationExpandTrigger" aria-expanded="false" aria-label="Show similar titles to ${esc(recommendation.title||"this recommendation")}">
+      <button type="button" class="archiveRecommendationPoster archiveRecommendationOpen" aria-label="Open details for ${esc(recommendation.title||"this recommendation")}">
         <img src="${esc(img(recommendation.posterPath))}" alt="" loading="lazy">
         <span>${typeLabels[recommendation.type]||"FILM"}${recommendation.year?` · ${esc(recommendation.year)}`:""}</span>
       </button>
       <div class="archiveRecommendationInfo">
-        <button type="button" class="archiveRecommendationTitle archiveRecommendationExpandTrigger" aria-expanded="false">${esc(recommendation.title||"Untitled")}</button>
+        <button type="button" class="archiveRecommendationTitle archiveRecommendationOpen">${esc(recommendation.title||"Untitled")}</button>
         ${recommendation.tmdbRating?`<small>TMDB ${Number(recommendation.tmdbRating).toFixed(1)}</small>`:""}
         <button type="button" class="archiveRecommendationExpand" aria-expanded="false">MORE LIKE THIS <span>＋</span></button>
         <div class="archiveRecommendationActions">
@@ -838,9 +838,57 @@ async function loadArchiveRecommendations(libraryMovies) {
   rail.querySelectorAll(".archiveRecommendationAdd").forEach(button=>{
     button.addEventListener("click",()=>addRecommendedTitle(button,button.dataset.status));
   });
-  rail.querySelectorAll(".archiveRecommendationExpand,.archiveRecommendationExpandTrigger").forEach(button=>{
+  rail.querySelectorAll(".archiveRecommendationOpen").forEach(button=>{
+    button.addEventListener("click",()=>openRecommendedTitle(button.closest(".archiveRecommendationCard")));
+  });
+  rail.querySelectorAll(".archiveRecommendationCard").forEach(card=>{
+    card.addEventListener("click",event=>{
+      if (event.target instanceof Element&&event.target.closest("button,a,.archiveRecommendationExpansion")) return;
+      openRecommendedTitle(card);
+    });
+  });
+  rail.querySelectorAll(".archiveRecommendationExpand").forEach(button=>{
     button.addEventListener("click",()=>toggleSimilarRecommendations(button));
   });
+}
+
+async function openRecommendedTitle(card) {
+  if (!card||card.dataset.opening==="true") return;
+  const action=card.querySelector(".archiveRecommendationAdd");
+  const id=action?.dataset.id;
+  const type=action?.dataset.type==="series"?"series":"movie";
+  if (!id) return;
+  card.dataset.opening="true";
+  card.setAttribute("aria-busy","true");
+  card.querySelectorAll(".archiveRecommendationOpen").forEach(button=>button.disabled=true);
+  let errorMessage=card.querySelector(".archiveRecommendationOpenError");
+  if (errorMessage) errorMessage.remove();
+  try {
+    const params=new URLSearchParams({id,type});
+    const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
+    const details=await readApiJson(response,"TMDB title details API");
+    if (!response.ok) throw new Error(details.error||"Could not load this recommendation.");
+    stage({
+      ...details,
+      tmdbId:details.tmdbId||id,
+      title:details.title||"Untitled",
+      type:details.type||type,
+      posterPath:details.posterPath||"",
+      backdropPath:details.backdropPath||"",
+      genres:Array.isArray(details.genres)?details.genres:[],
+      cast:details.cast||[]
+    });
+  } catch(error) {
+    console.error("Could not open TMDB recommendation details.",error);
+    errorMessage=document.createElement("p");
+    errorMessage.className="archiveRecommendationOpenError";
+    errorMessage.textContent=error.message||"Could not load this title's details.";
+    card.querySelector(".archiveRecommendationInfo")?.append(errorMessage);
+  } finally {
+    delete card.dataset.opening;
+    card.removeAttribute("aria-busy");
+    card.querySelectorAll(".archiveRecommendationOpen").forEach(button=>button.disabled=false);
+  }
 }
 
 async function toggleSimilarRecommendations(button) {
@@ -857,15 +905,9 @@ async function toggleSimilarRecommendations(button) {
       other.querySelector(".archiveRecommendationExpansion").hidden=true;
       other.querySelector(".archiveRecommendationExpand").setAttribute("aria-expanded","false");
       other.querySelector(".archiveRecommendationExpand").innerHTML="MORE LIKE THIS <span>＋</span>";
-      other.querySelectorAll(".archiveRecommendationExpandTrigger").forEach(trigger=>
-        trigger.setAttribute("aria-expanded","false")
-      );
     });
   }
   control.setAttribute("aria-expanded",String(!open));
-  card.querySelectorAll(".archiveRecommendationExpandTrigger").forEach(trigger=>
-    trigger.setAttribute("aria-expanded",String(!open))
-  );
   control.innerHTML=open?"MORE LIKE THIS <span>＋</span>":"SIMILAR PICKS <span>−</span>";
   card.classList.toggle("expanded",!open);
   expansion.hidden=open;
