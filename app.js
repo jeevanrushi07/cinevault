@@ -204,6 +204,7 @@ async function deleteMovie(id) {
 window.deleteMovie = deleteMovie;
 
 function shell() {
+  clearInterval(chatRefreshTimer);
   document.body.innerHTML = `
     <div class="app">
       <aside>
@@ -252,6 +253,13 @@ function shell() {
   $("#profile").onclick = profileModal;
   $("#logout").onclick = $("#logoutTop").onclick = logout;
   $("#notificationBell").onclick=toggleNotifications;
+  document.onkeydown=e=>{
+    if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k") {
+      e.preventDefault();
+      $("#search")?.focus();
+      $("#search")?.select();
+    }
+  };
   let headerSearchTimer;
   $("#search").oninput = e => {
     searchQuery = e.target.value;
@@ -1180,6 +1188,15 @@ function authModal(message="") {
       $("#authGo").disabled=false;
     }
   };
+
+  ["#au","#ap"].forEach(selector=>{
+    $(selector).onkeydown=event=>{
+      if (event.key==="Enter") {
+        event.preventDefault();
+        $("#authGo").click();
+      }
+    };
+  });
 }
 
 async function addModal() {
@@ -1343,7 +1360,7 @@ function stage(m,readOnly=false) {
   document.body.insertAdjacentHTML("beforeend",`
     <div class="stage" id="stage">
       <button class="x" onclick="$('#stage').remove()">×</button>
-      <div class="stagebg" style="background-image:linear-gradient(90deg,#08080c 20%,rgba(8,8,12,.8),rgba(8,8,12,.15)),url('${backdrop(m.backdropPath)}')">
+      <div class="stagebg" onclick="event.stopPropagation()" style="background-image:linear-gradient(90deg,#08080c 20%,rgba(8,8,12,.8),rgba(8,8,12,.15)),url('${backdrop(m.backdropPath)}')">
         <div class="stagebody">
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
@@ -1386,6 +1403,10 @@ function stage(m,readOnly=false) {
         </div>
       </div>
     </div>`);
+
+  $("#stage").onclick=e=>{
+    if (e.target===e.currentTarget) $("#stage").remove();
+  };
 
   if (!readOnly) $("#note").onblur=async e=>{
     try {
