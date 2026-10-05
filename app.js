@@ -784,6 +784,7 @@ function recent() {
           <div>
             <small>${esc(m.type||"movie")} · ${esc(m.year)}</small>
             <h2>${esc(m.title)}</h2>
+            <span class="recentStatus ${m.status==="want"?"recentStatusWant":"recentStatusWatched"}">${m.status==="want"?"WANT TO WATCH":"WATCHED · IN COLLECTION"}</span>
             <p>${esc(m.overview||"No synopsis available.")}</p>
           </div>
         </article>`).join("")}
