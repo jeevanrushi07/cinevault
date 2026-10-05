@@ -35,8 +35,12 @@ const stageBackdropVisits = new Map();
 let stageTrailerPlayer = null;
 let stageTrailerIdleTimer = null;
 let stageTrailerPointerHandler = null;
+let stageTrailerScrollHandler = null;
 let stageTrailerGeneration = 0;
+let stageTrailerIsIdle = false;
+let stageTrailerVideoId = "";
 let youtubePlayerApiPromise = null;
+let trailerReadMode = localStorage.getItem("cinevault-read-mode")==="true";
 const copyFeedbackTimers = new WeakMap();
 
 function personPageUrl(person) {
@@ -1966,7 +1970,7 @@ function stage(m,readOnly=false,options={}) {
   const listStatus=savedMovie?.status||"";
 
   document.body.insertAdjacentHTML("beforeend",`
-    <div class="stage ${options.direction===1?"movieSlideNext":options.direction===-1?"movieSlidePrevious":""}" id="stage" data-movie-id="${esc(m.tmdbId)}">
+    <div class="stage ${options.direction===1?"movieSlideNext":options.direction===-1?"movieSlidePrevious":""}" id="stage" data-movie-id="${esc(m.tmdbId)}" data-trailer-key="${esc(m.trailerKey||"")}">
       ${activeStageSequence.length>1?`
         <button type="button" class="movieNavArrow movieNavPrevious ${movieIndex===0?"atSequenceEdge":""}" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" aria-disabled="${movieIndex===0}">‹</button>
         <button type="button" class="movieNavArrow movieNavNext ${movieIndex===activeStageSequence.length-1?"atSequenceEdge":""}" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" aria-disabled="${movieIndex===activeStageSequence.length-1}">›</button>`:""}
@@ -1978,6 +1982,11 @@ function stage(m,readOnly=false,options={}) {
         <div class="stageListControls" role="group" aria-label="Your movie lists">
           <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
           <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
+          <label class="readModeToggle" title="Disable automatic trailer playback">
+            <input type="checkbox" ${trailerReadMode?"checked":""} onchange="setTrailerReadMode(this.checked)">
+            <span class="readModeSwitch" aria-hidden="true"></span>
+            <span>Read mode</span>
+          </label>
         </div>
         <div class="stagebody">
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
@@ -2130,6 +2139,12 @@ function stopStageTrailer() {
     document.removeEventListener("pointermove",stageTrailerPointerHandler);
     stageTrailerPointerHandler=null;
   }
+  if (stageTrailerScrollHandler) {
+    document.removeEventListener("scroll",stageTrailerScrollHandler,true);
+    stageTrailerScrollHandler=null;
+  }
+  stageTrailerIsIdle=false;
+  stageTrailerVideoId="";
   if (stageTrailerPlayer) {
     stageTrailerPlayer.destroy();
     stageTrailerPlayer=null;
@@ -2140,57 +2155,70 @@ function stopStageTrailer() {
 function setupStageTrailer(videoId) {
   const holder=$("#stageTrailerPlayer");
   const stageElement=$("#stage");
-  if (!holder||!stageElement||!videoId) return;
+  if (!holder||!stageElement||!videoId||trailerReadMode) return;
   stopStageTrailer();
   const generation=stageTrailerGeneration;
-  let isIdle=false;
-  const startAfterIdle=()=>{
-    clearTimeout(stageTrailerIdleTimer);
-    stageTrailerIdleTimer=setTimeout(async()=>{
-      if (generation!==stageTrailerGeneration||!$("#stageTrailerPlayer")) return;
-      isIdle=true;
-      $("#stage")?.classList.add("trailerVisible");
-      try {
-        const YT=await loadYouTubePlayerApi();
-        if (generation!==stageTrailerGeneration||!$("#stageTrailerPlayer")) return;
-        if (!stageTrailerPlayer) {
-          stageTrailerPlayer=new YT.Player("stageTrailerPlayer",{
-            videoId,
-            playerVars:{autoplay:0,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,playsinline:1,rel:0},
-            events:{
-              onReady:event=>{
-                event.target.mute();
-                if (isIdle&&generation===stageTrailerGeneration) event.target.playVideo();
-                else event.target.pauseVideo();
-              },
-              onStateChange:event=>{
-                if (event.data===YT.PlayerState.ENDED&&isIdle&&generation===stageTrailerGeneration) {
-                  event.target.seekTo(0,true);
-                  event.target.mute();
-                  event.target.playVideo();
-                }
-              }
-            }
-          });
-        } else {
-          stageTrailerPlayer.mute();
-          stageTrailerPlayer.playVideo();
-        }
-      } catch(error) {
-        $("#stage")?.classList.remove("trailerVisible");
-        console.error("Could not start the muted background trailer.",error);
-      }
-    },3500);
-  };
+  stageTrailerIsIdle=false;
+  stageTrailerVideoId=videoId;
   stageTrailerPointerHandler=()=>{
-    isIdle=false;
-    clearTimeout(stageTrailerIdleTimer);
-    $("#stage")?.classList.remove("trailerVisible");
-    if (stageTrailerPlayer) stageTrailerPlayer.pauseVideo();
-    startAfterIdle();
+    stageTrailerActivity();
   };
+  stageTrailerScrollHandler=()=>stageTrailerActivity();
   document.addEventListener("pointermove",stageTrailerPointerHandler,{passive:true});
-  startAfterIdle();
+  document.addEventListener("scroll",stageTrailerScrollHandler,{capture:true,passive:true});
+  scheduleStageTrailer(generation);
+}
+
+function scheduleStageTrailer(generation=stageTrailerGeneration) {
+  clearTimeout(stageTrailerIdleTimer);
+  stageTrailerIdleTimer=setTimeout(()=>startStageTrailerAfterIdle(generation),5000);
+}
+
+async function startStageTrailerAfterIdle(generation) {
+  if (generation!==stageTrailerGeneration||trailerReadMode||!stageTrailerVideoId||!$("#stageTrailerPlayer")) return;
+  stageTrailerIsIdle=true;
+  try {
+    const YT=await loadYouTubePlayerApi();
+    if (generation!==stageTrailerGeneration||!stageTrailerIsIdle||trailerReadMode||!$("#stageTrailerPlayer")) return;
+    if (!stageTrailerPlayer) {
+      stageTrailerPlayer=new YT.Player("stageTrailerPlayer",{
+        videoId:stageTrailerVideoId,
+        playerVars:{autoplay:0,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,playsinline:1,rel:0},
+        events:{
+          onReady:event=>{
+            event.target.mute();
+            if (stageTrailerIsIdle&&generation===stageTrailerGeneration) event.target.playVideo();
+            else event.target.pauseVideo();
+          },
+          onStateChange:event=>{
+            if (event.data===YT.PlayerState.PLAYING&&stageTrailerIsIdle&&generation===stageTrailerGeneration) {
+              $("#stage")?.classList.add("trailerVisible");
+            }
+            if (event.data===YT.PlayerState.ENDED&&stageTrailerIsIdle&&generation===stageTrailerGeneration) {
+              event.target.seekTo(0,true);
+              event.target.mute();
+              event.target.playVideo();
+            }
+          }
+        }
+      });
+    } else {
+      stageTrailerPlayer.mute();
+      stageTrailerPlayer.playVideo();
+    }
+  } catch(error) {
+    $("#stage")?.classList.remove("trailerVisible");
+    console.error("Could not start the muted background trailer.",error);
+  }
+}
+
+function stageTrailerActivity() {
+  if (trailerReadMode||!stageTrailerPointerHandler) return;
+  stageTrailerIsIdle=false;
+  clearTimeout(stageTrailerIdleTimer);
+  $("#stage")?.classList.remove("trailerVisible");
+  if (stageTrailerPlayer) stageTrailerPlayer.pauseVideo();
+  scheduleStageTrailer();
 }
 
 function navigateStageMovie(direction) {
@@ -2202,6 +2230,16 @@ function navigateStageMovie(direction) {
   const readOnly=document.querySelector("#stage .stagebg")?.dataset.readOnly==="true";
   stage(nextMovie,readOnly,{sequence:activeStageSequence,direction});
 }
+
+window.setTrailerReadMode=enabled=>{
+  trailerReadMode=Boolean(enabled);
+  localStorage.setItem("cinevault-read-mode",String(trailerReadMode));
+  if (trailerReadMode) {
+    stopStageTrailer();
+  } else if (activeStageMovie?.trailerKey) {
+    setupStageTrailer(activeStageMovie.trailerKey);
+  }
+};
 
 window.setStageListStatus=async status=>{
   const stageMovie=activeStageMovie;
