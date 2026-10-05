@@ -24,7 +24,7 @@ export default async function handler(req,res) {
 
   try {
     for (const endpoint of endpoints) {
-      response=await fetch(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(id)}?api_key=${encodeURIComponent(key)}&append_to_response=credits,videos,external_ids,images&include_image_language=en,null`);
+      response=await fetch(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(id)}?api_key=${encodeURIComponent(key)}&append_to_response=credits,videos,external_ids,images&include_image_language=en,null&include_video_language=en,null`);
       data=await readServiceJson(response,"TMDB");
       if (response.ok) {
         type=endpoint==="tv"?"series":"movie";

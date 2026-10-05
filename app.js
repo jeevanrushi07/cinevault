@@ -2015,6 +2015,7 @@ function stage(m,readOnly=false,options={}) {
         <div class="stageBackdropLayer active" id="stageBackdropA" aria-hidden="true" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(selectedBackdrop)}')"></div>
         <div class="stageBackdropLayer" id="stageBackdropB" aria-hidden="true"></div>
         <div class="stageTrailerLayer" id="stageTrailerLayer" aria-hidden="true"><div id="stageTrailerPlayer"></div></div>
+        <a class="stageTrailerFallback" id="stageTrailerFallback" target="_blank" rel="noopener" hidden>▶ Open trailer on YouTube</a>
         <div class="stageListControls" role="group" aria-label="Your movie lists">
           <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
           <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
@@ -2236,6 +2237,7 @@ async function startStageTrailerAfterIdle(generation) {
           onStateChange:event=>{
             if (event.data===YT.PlayerState.PLAYING&&stageTrailerIsIdle&&generation===stageTrailerGeneration) {
               $("#stage")?.classList.add("trailerVisible");
+              $("#stageTrailerFallback")?.setAttribute("hidden","");
             }
             if (event.data===YT.PlayerState.ENDED&&stageTrailerIsIdle&&generation===stageTrailerGeneration) {
               event.target.seekTo(0,true);
@@ -2261,6 +2263,12 @@ function tryNextStageTrailer(errorCode,generation=stageTrailerGeneration) {
   const nextIndex=stageTrailerCandidateIndex+1;
   if (nextIndex>=stageTrailerCandidates.length) {
     $("#stage")?.classList.remove("trailerVisible");
+    const fallback=$("#stageTrailerFallback");
+    if (fallback) {
+      fallback.href=`https://www.youtube.com/watch?v=${encodeURIComponent(stageTrailerCandidates[0])}`;
+      fallback.hidden=false;
+      fallback.title=`YouTube blocked all ${stageTrailerCandidates.length} trailer embeds (last error ${errorCode}). Open the trailer directly on YouTube.`;
+    }
     console.error(`All ${stageTrailerCandidates.length} embedded trailer candidates failed. Last YouTube player error: ${errorCode}.`);
     return;
   }
