@@ -703,9 +703,10 @@ function watchlist(ms=movies.filter(m => m.status === "want")) {
 
 window.dropWatch = async e => {
   e.preventDefault();
+  const dropTarget=e.currentTarget;
+  const sharedPayload=e.dataTransfer.getData("application/x-cinevault-movie");
 
   try {
-    const sharedPayload=e.dataTransfer.getData("application/x-cinevault-movie");
     if (sharedPayload) {
       const sharedMovie=JSON.parse(sharedPayload);
       const existing=movies.find(movie=>String(movie.tmdbId)===String(sharedMovie.tmdbId));
@@ -722,9 +723,19 @@ window.dropWatch = async e => {
       if (!m) return;
       await updateMovie(m,{status:"want"});
     }
-    show("archive");
+    if (sharedPayload && activeTab==="sharedLibrary" && activeSharedShareId) {
+      dropTarget.classList.add("dropComplete");
+      await new Promise(resolve=>setTimeout(resolve,260));
+      await renderSharedLibrary(activeSharedShareId);
+    } else {
+      show("archive");
+    }
   } catch(err) {
     alert(err.message);
+  } finally {
+    dropTarget.classList.remove("dragOver");
+    dropTarget.classList.add("dropComplete");
+    setTimeout(()=>dropTarget.classList.remove("dropComplete"),300);
   }
 };
 
@@ -927,7 +938,7 @@ async function renderSharedLibrary(shareId) {
         <button onclick="show('shared')">← All shared libraries</button>
       </div>
       <p class="muted">${shareExpiryText(share)} · ${watched.length} watched · ${want.length} want to watch</p>
-      <div class="sharedDropTarget" ondragover="event.preventDefault();this.classList.add('dragOver')" ondragleave="this.classList.remove('dragOver')" ondrop="dropWatch(event);this.classList.remove('dragOver')">
+      <div class="sharedDropTarget" aria-label="Drop a title here to add it to your Want to watch">
         <b>＋ Add to your Want to watch</b>
         <small>Drag a title here to add it to your list</small>
       </div>
@@ -952,6 +963,23 @@ async function renderSharedLibrary(shareId) {
       };
     }
   });
+
+  const dropTarget=document.querySelector(".sharedDropTarget");
+  if (dropTarget) {
+    dropTarget.ondragenter=event=>{
+      event.preventDefault();
+      dropTarget.classList.add("dragOver");
+    };
+    dropTarget.ondragover=event=>{
+      event.preventDefault();
+      if (!dropTarget.classList.contains("dragOver")) dropTarget.classList.add("dragOver");
+    };
+    dropTarget.ondragleave=event=>{
+      if (event.relatedTarget instanceof Node&&dropTarget.contains(event.relatedTarget)) return;
+      dropTarget.classList.remove("dragOver");
+    };
+    dropTarget.ondrop=dropWatch;
+  }
 
   if (sharedLibraryTimer) clearInterval(sharedLibraryTimer);
   sharedLibraryTimer=setInterval(()=>refreshSharedLibraryAccess(shareId),15000);
