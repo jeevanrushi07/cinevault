@@ -21,6 +21,7 @@ let characters = [];
 let incomingShares = [];
 let outgoingShares = [];
 let activeTab = "archive";
+let activeStageSequence = [];
 let searchQuery = "";
 let sharedLibraryTimer = null;
 let activeSharedShareId = null;
@@ -312,6 +313,11 @@ function shell() {
       history.forward();
       return;
     }
+    if ($("#stage")&&!editingTarget&&(e.key==="ArrowLeft"||e.key==="ArrowRight")) {
+      e.preventDefault();
+      navigateStageMovie(e.key==="ArrowLeft"?-1:1);
+      return;
+    }
     if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k") {
       e.preventDefault();
       $("#search")?.focus();
@@ -343,18 +349,27 @@ async function restoreAppRoute(route) {
   document.querySelectorAll(".modal").forEach(modal=>modal.remove());
   await show(route.tab||"archive",route.routeParam||"",{history:false});
   if (route.detail?.type==="movie"&&route.detail.movie) {
-    stage(route.detail.movie,Boolean(route.detail.readOnly),{history:false});
+    stage(route.detail.movie,Boolean(route.detail.readOnly),{
+      history:false,
+      sequence:route.detail.sequence
+    });
   } else if (route.detail?.type==="movie"&&route.detail.id) {
     const savedMovie=movies.find(movie=>String(movie.tmdbId)===String(route.detail.id));
     if (savedMovie) {
-      stage(savedMovie,Boolean(route.detail.readOnly),{history:false});
+      stage(savedMovie,Boolean(route.detail.readOnly),{
+        history:false,
+        sequence:route.detail.sequence
+      });
     } else {
       try {
         const params=new URLSearchParams({id:String(route.detail.id)});
         const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
         const movie=await readApiJson(response,"Movie details API");
         if (!response.ok) throw new Error(movie.error||"Could not restore this movie.");
-        stage(movie,Boolean(route.detail.readOnly),{history:false});
+        stage(movie,Boolean(route.detail.readOnly),{
+          history:false,
+          sequence:route.detail.sequence
+        });
       } catch(error) {
         const content=$("#content");
         if (content) content.innerHTML=`<p class="personError">${esc(error.message||"Could not restore this movie.")}</p>`;
@@ -495,7 +510,7 @@ async function show(tab, q = "", options = {}) {
     </div>`;
 
   document.querySelectorAll(".poster").forEach(p => {
-    p.onclick = () => stage(movies.find(m => String(m.tmdbId) === p.dataset.id));
+    p.onclick = () => stageFromCard(movies.find(m => String(m.tmdbId) === p.dataset.id),p);
     p.addEventListener("dragstart", e => e.dataTransfer.setData("text/plain", p.dataset.id));
   });
   const watchTarget=document.querySelector(".vertical-watch");
@@ -849,7 +864,7 @@ function watchlist(ms=movies.filter(m => m.status === "want")) {
       ${
         ms.length
         ? ms.map(m=>`
-          <article onclick="stageById('${m.tmdbId}')">
+          <article data-id="${m.tmdbId}" onclick="stageById('${m.tmdbId}',this)">
             <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
             <b>${esc(m.title)}<small>${esc(m.year)}</small></b>
           </article>`).join("")
@@ -904,7 +919,7 @@ function recent() {
     </div>
     <div class="timeline">
       ${ms.map(m=>`
-        <article onclick="stageById('${m.tmdbId}')">
+        <article data-id="${m.tmdbId}" onclick="stageById('${m.tmdbId}',this)">
           <time>${m.addedAt ? new Date(m.addedAt).toLocaleDateString(undefined,{month:"short",day:"2-digit"}) : ""}</time>
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
@@ -917,7 +932,24 @@ function recent() {
     </div>`;
 }
 
-window.stageById = id => stage(movies.find(m => String(m.tmdbId) === String(id)));
+function stageFromCard(movie,card,readOnly=false,sequenceOverride=null) {
+  if (!movie) return;
+  let cards=[];
+  if (card instanceof Element) {
+    if (card.matches(".poster")) cards=[...card.parentElement.querySelectorAll(":scope > .poster")];
+    else if (card.matches(".timeline article")) cards=[...card.parentElement.querySelectorAll(":scope > article")];
+    else if (card.matches(".watch article")) cards=[...card.parentElement.querySelectorAll(":scope > article")];
+  }
+  const sequence=sequenceOverride||cards
+    .map(item=>movies.find(candidate=>String(candidate.tmdbId)===item.dataset.id))
+    .filter(Boolean);
+  stage(movie,readOnly,{sequence:sequence.length?sequence:[movie]});
+}
+
+window.stageById = (id,card=null) => stageFromCard(
+  movies.find(m=>String(m.tmdbId)===String(id)),
+  card
+);
 
 function creditImage(path) {
   if (!path) return "";
@@ -1379,7 +1411,11 @@ async function renderSharedLibrary(shareId) {
 
   document.querySelectorAll("#content .poster").forEach(card=>{
     const movie=sharedMovies.find(m=>String(m.tmdbId)===card.dataset.id);
-    card.onclick=()=>stage(movie,true);
+    card.onclick=()=>stage(movie,true,{
+      sequence:[...card.parentElement.querySelectorAll(":scope > .poster")]
+        .map(item=>sharedMovies.find(candidate=>String(candidate.tmdbId)===item.dataset.id))
+        .filter(Boolean)
+    });
     if (card.draggable && movie) {
       card.ondragstart=event=>{
         event.dataTransfer.setData("application/x-cinevault-movie",JSON.stringify(movie));
@@ -1814,10 +1850,26 @@ function stage(m,readOnly=false,options={}) {
 
   $("#stage")?.remove();
   activeStageMovie=m;
+  if (Array.isArray(options.sequence)&&options.sequence.length) {
+    activeStageSequence=options.sequence;
+  } else {
+    activeStageSequence=[m];
+  }
+  let movieIndex=activeStageSequence.findIndex(movie=>String(movie.tmdbId)===String(m.tmdbId));
+  if (movieIndex<0) {
+    activeStageSequence=[m];
+    movieIndex=0;
+  }
   document.title=`${m.title||"Movie"} | CineVault`;
   if (options.history!==false) {
     const current=history.state&&typeof history.state==="object"?history.state:{};
-    const detail={type:"movie",id:String(m.tmdbId),movie:m,readOnly};
+    const detail={
+      type:"movie",
+      id:String(m.tmdbId),
+      movie:m,
+      readOnly,
+      sequence:activeStageSequence
+    };
     if (current.detail?.type!=="movie"||String(current.detail.id)!==String(m.tmdbId)) {
       history.pushState({
         ...current,
@@ -1837,7 +1889,10 @@ function stage(m,readOnly=false,options={}) {
   const listStatus=savedMovie?.status||"";
 
   document.body.insertAdjacentHTML("beforeend",`
-    <div class="stage" id="stage" data-movie-id="${esc(m.tmdbId)}">
+    <div class="stage ${options.direction===1?"movieSlideNext":options.direction===-1?"movieSlidePrevious":""}" id="stage" data-movie-id="${esc(m.tmdbId)}">
+      ${activeStageSequence.length>1?`
+        <button type="button" class="movieNavArrow movieNavPrevious" onclick="navigateStageMovie(-1)" aria-label="Previous movie" title="Previous movie" ${movieIndex===0?"disabled":""}>‹</button>
+        <button type="button" class="movieNavArrow movieNavNext" onclick="navigateStageMovie(1)" aria-label="Next movie" title="Next movie" ${movieIndex===activeStageSequence.length-1?"disabled":""}>›</button>`:""}
       <button class="x" onclick="closeAppDetail()">×</button>
       <div class="stagebg" data-read-only="${readOnly}" style="background-image:linear-gradient(90deg,rgba(8,8,12,.42),rgba(8,8,12,.68),rgba(8,8,12,.4)),url('${backdrop(m.backdropPath||m.posterPath)}')">
         <div class="stageListControls" role="group" aria-label="Your movie lists">
@@ -1897,6 +1952,16 @@ function stage(m,readOnly=false,options={}) {
   };
 }
 
+function navigateStageMovie(direction) {
+  const currentIndex=activeStageSequence.findIndex(movie=>
+    String(movie.tmdbId)===String(activeStageMovie?.tmdbId)
+  );
+  const nextMovie=activeStageSequence[currentIndex+direction];
+  if (!nextMovie) return;
+  const readOnly=document.querySelector("#stage .stagebg")?.dataset.readOnly==="true";
+  stage(nextMovie,readOnly,{sequence:activeStageSequence,direction});
+}
+
 window.setStageListStatus=async status=>{
   const stageMovie=activeStageMovie;
   if (!stageMovie||!["watched","want"].includes(status)) return;
@@ -1906,10 +1971,16 @@ window.setStageListStatus=async status=>{
   try {
     if (savedMovie) {
       await updateMovie(savedMovie,{status});
-      stage({...stageMovie,status},document.querySelector("#stage .stagebg")?.dataset.readOnly==="true",{history:false});
+      stage({...stageMovie,status},document.querySelector("#stage .stagebg")?.dataset.readOnly==="true",{
+        history:false,
+        sequence:activeStageSequence
+      });
     } else {
       await saveMovie(stageMovie,status);
-      stage({...stageMovie,status},document.querySelector("#stage .stagebg")?.dataset.readOnly==="true",{history:false});
+      stage({...stageMovie,status},document.querySelector("#stage .stagebg")?.dataset.readOnly==="true",{
+        history:false,
+        sequence:activeStageSequence
+      });
     }
   } catch(error) {
     alert(error.message||"Could not update movie list.");
