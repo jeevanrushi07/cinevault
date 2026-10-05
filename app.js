@@ -40,6 +40,8 @@ let stageTrailerGeneration = 0;
 let stageTrailerIsIdle = false;
 let stageTrailerVideoId = "";
 let youtubePlayerApiPromise = null;
+let archiveSearchScrollHandler = null;
+let archiveSearchCompressed = false;
 let trailerReadMode = localStorage.getItem("cinevault-read-mode")==="true";
 const copyFeedbackTimers = new WeakMap();
 
@@ -238,6 +240,11 @@ window.deleteMovie = deleteMovie;
 
 function shell() {
   clearInterval(chatRefreshTimer);
+  archiveSearchCompressed=false;
+  if (archiveSearchScrollHandler) {
+    window.removeEventListener("scroll",archiveSearchScrollHandler);
+    archiveSearchScrollHandler=null;
+  }
   document.body.innerHTML = `
     <div class="app">
       <aside>
@@ -269,7 +276,7 @@ function shell() {
       </aside>
       <main>
         <header>
-          <div class="search">
+          <div class="search searchExpanded">
             ⌕
             <input id="search" autocomplete="off" placeholder="Search your archive or add a movie...">
             <kbd>⌘ K</kbd>
@@ -292,6 +299,13 @@ function shell() {
   $("#profile").onclick = profileModal;
   $("#logout").onclick = $("#logoutTop").onclick = logout;
   $("#notificationBell").onclick=toggleNotifications;
+  archiveSearchScrollHandler=()=>{
+    if (window.scrollY>0) {
+      archiveSearchCompressed=true;
+      $(".search")?.classList.remove("searchExpanded");
+    }
+  };
+  window.addEventListener("scroll",archiveSearchScrollHandler,{passive:true});
   window.onpopstate=e=>{
     if (!e.state?.cineVaultRoute) return;
     restoreAppRoute(e.state);
@@ -343,12 +357,29 @@ function shell() {
     if ($("#search").value.trim().length>=2) searchHeaderTitles($("#search").value);
   };
   document.addEventListener("click",e=>{
+    setTimeout(()=>{
+      const target=e.target instanceof Element?e.target:null;
+      if (activeTab!=="archive"||history.state?.detail||$("#stage")||
+        document.querySelector(".modal,#profileImageViewer")||
+        target?.closest("input,textarea,select,[contenteditable='true'],.search")) return;
+      focusArchiveSearch();
+    },0);
     if (!e.target.closest(".search")) $("#searchResults").classList.remove("open");
     if (!e.target.closest(".notificationWrap")) $("#notificationPanel").classList.remove("open");
   });
   updateNotificationBadge();
   clearInterval(notificationRefreshTimer);
   notificationRefreshTimer=setInterval(refreshNotifications,20000);
+  if (activeTab==="archive") focusArchiveSearch();
+}
+
+function focusArchiveSearch() {
+  if (activeTab!=="archive"||history.state?.detail||$("#stage")||
+    document.querySelector(".modal,#profileImageViewer")) return;
+  const search=$("#search");
+  if (!search) return;
+  if (!archiveSearchCompressed) search.closest(".search")?.classList.add("searchExpanded");
+  search.focus({preventScroll:true});
 }
 
 async function restoreAppRoute(route) {
@@ -473,6 +504,7 @@ async function show(tab, q = "", options = {}) {
   if (options.history!==false) $("#stage")?.remove();
   if (tab !== "sharedLibrary") stopSharedLibraryMonitor();
   if (tab !== "network") clearInterval(chatRefreshTimer);
+  if (tab==="archive"&&activeTab!=="archive") archiveSearchCompressed=false;
   activeTab = tab;
   document.title="CineVault";
   const c = $("#content");
@@ -556,6 +588,7 @@ async function show(tab, q = "", options = {}) {
     };
     watchTarget.ondrop=dropWatch;
   }
+  focusArchiveSearch();
 }
 
 function updateNotificationBadge() {
