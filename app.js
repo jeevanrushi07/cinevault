@@ -577,7 +577,15 @@ async function show(tab, q = "", options = {}) {
       "",
       "Thank you,"
     ].join("\n");
-    const composeUrl=`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent("jeevanrushicreations584@gmail.com")}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const composeParams=new URLSearchParams({
+      view:"cm",
+      fs:"1",
+      to:"jeevanrushicreations584@gmail.com",
+      su:subject,
+      body
+    });
+    if (currentUser?.email) composeParams.set("authuser",currentUser.email);
+    const composeUrl=`https://mail.google.com/mail/?${composeParams}`;
     c.innerHTML=`
       <section class="contactPage">
         <div class="contactPageGlow" aria-hidden="true"></div>
@@ -595,7 +603,7 @@ async function show(tab, q = "", options = {}) {
             <span aria-hidden="true">↗</span>
           </a>
         </div>
-        <p class="contactPrivacy">Gmail will open a prefilled draft addressed to Jeevan. Sign in if prompted, then review and send it. Please don’t include passwords or private API keys.</p>
+        <p class="contactPrivacy">Gmail will open a prefilled draft using the Google account matching your CineVault email when that account is signed in. Gmail must have permission to send from that address. Please don’t include passwords or private API keys.</p>
       </section>`;
     return;
   }
