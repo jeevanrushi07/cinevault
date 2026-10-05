@@ -220,6 +220,7 @@ function shell() {
             <div id="searchResults" class="headerResults"></div>
           </div>
           <button id="addTop" aria-label="Add a movie">＋</button>
+          <button id="logoutTop" class="headerLogout">↪ Logout</button>
         </header>
         <div id="content"></div>
       </main>
@@ -230,7 +231,7 @@ function shell() {
   $("#add").onclick = $("#addTop").onclick = addModal;
   $("#share").onclick = shareLibraryModal;
   $("#profile").onclick = profileModal;
-  $("#logout").onclick = logout;
+  $("#logout").onclick = $("#logoutTop").onclick = logout;
   let headerSearchTimer;
   $("#search").oninput = e => {
     searchQuery = e.target.value;
@@ -872,17 +873,20 @@ async function fetchTitles(query) {
 function titleResultMarkup(item,compact=false) {
   const title=item.title||item.name||"Untitled";
   const searchUrl=`https://www.google.com/search?q=${encodeURIComponent(title)}`;
+  const saved=movies.find(movie=>String(movie.tmdbId)===String(item.id));
   return `
-    <div class="result ${compact?"compactResult":""}">
+    <div class="result ${compact?"compactResult":""} ${saved?"savedResult":""}">
       <img src="${img(item.poster_path)}" alt="${esc(title)}">
       <div>
         <b><a class="movieSearchLink" href="${searchUrl}" target="_blank" rel="noopener">${esc(title)}</a></b>
         <small>${(item.release_date||item.first_air_date||"").slice(0,4)} · ${item.media_type==="tv"?"Series":"Movie"}</small>
         ${compact ? "" : `<p>${esc(item.overview||"")}</p>`}
-        <div class="resultActions">
-          <button class="primary" onclick='choose(${JSON.stringify(item).replace(/'/g,"&#39;")},"watched")'>＋ Watched</button>
-          <button onclick='choose(${JSON.stringify(item).replace(/'/g,"&#39;")},"want")'>＋ Want to watch</button>
-        </div>
+        ${saved
+          ? `<div class="libraryStatus">${saved.status==="want"?"Already in Want to watch":"Already watched"}</div>`
+          : `<div class="resultActions">
+              <button class="primary" onclick='choose(${JSON.stringify(item).replace(/'/g,"&#39;")},"watched")'>＋ Watched</button>
+              <button onclick='choose(${JSON.stringify(item).replace(/'/g,"&#39;")},"want")'>＋ Want to watch</button>
+            </div>`}
       </div>
     </div>`;
 }
@@ -906,8 +910,15 @@ async function searchHeaderTitles(query) {
   try {
     const found=await fetchTitles(query);
     if (request!==headerSearchRequest || $("#search")?.value.trim()!==query.trim()) return;
+    const alreadySaved=found.filter(item=>movies.some(movie=>String(movie.tmdbId)===String(item.id)));
+    const toAdd=found.filter(item=>!movies.some(movie=>String(movie.tmdbId)===String(item.id)));
     results.innerHTML=found.length
-      ? `<p class="searchStatus">ADD A TITLE · click a title to search the web</p>${found.map(item=>titleResultMarkup(item,true)).join("")}`
+      ? `${alreadySaved.length
+          ? `<section class="searchTray alreadySavedTray"><p class="searchStatus">ALREADY IN YOUR LIBRARY</p>${alreadySaved.map(item=>titleResultMarkup(item,true)).join("")}</section>`
+          : ""}
+        ${toAdd.length
+          ? `<section class="searchTray addTitlesTray"><p class="searchStatus">ADD TO YOUR LIBRARY</p>${toAdd.map(item=>titleResultMarkup(item,true)).join("")}</section>`
+          : ""}`
       : '<p class="muted searchStatus">No matching movies or series.</p>';
   } catch(error) {
     if (request!==headerSearchRequest) return;
