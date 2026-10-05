@@ -910,6 +910,10 @@ async function renderSharedLibrary(shareId) {
         <button onclick="show('shared')">← All shared libraries</button>
       </div>
       <p class="muted">${shareExpiryText(share)} · ${watched.length} watched · ${want.length} want to watch</p>
+      <div class="sharedDropTarget" ondragover="event.preventDefault();this.classList.add('dragOver')" ondragleave="this.classList.remove('dragOver')" ondrop="dropWatch(event);this.classList.remove('dragOver')">
+        <b>＋ Add to your Want to watch</b>
+        <small>Drag a title here to add it to your list</small>
+      </div>
       <div class="head"><div><span>WATCHED</span><h2>Seen</h2></div><small>${watched.length} TITLES</small></div>
       <p class="muted sharedLibraryHint">Drag a title to your Want to watch panel. Titles already in your library are marked.</p>
       ${watched.length
