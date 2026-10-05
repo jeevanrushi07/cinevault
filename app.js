@@ -33,6 +33,11 @@ let notificationRefreshTimer = null;
 let activeStageMovie = null;
 let stageBackdropTimer = null;
 let stageBackdropIndex = 0;
+let stageTrailerPlayer = null;
+let stageTrailerIdleTimer = null;
+let stageTrailerPointerHandler = null;
+let stageTrailerGeneration = 0;
+let youtubePlayerApiPromise = null;
 const copyFeedbackTimers = new WeakMap();
 
 function personPageUrl(person) {
@@ -292,6 +297,7 @@ function shell() {
     if (e.key==="Escape") {
       e.preventDefault();
       $("#profileImageViewer")?.remove();
+      stopStageTrailer();
       clearInterval(stageBackdropTimer);
       stageBackdropTimer=null;
       $("#stage")?.remove();
@@ -345,6 +351,9 @@ function shell() {
 }
 
 async function restoreAppRoute(route) {
+  stopStageTrailer();
+  clearInterval(stageBackdropTimer);
+  stageBackdropTimer=null;
   clearInterval(stageBackdropTimer);
   stageBackdropTimer=null;
   $("#stage")?.remove();
@@ -412,6 +421,7 @@ function initialAppRoute() {
 }
 
 function closeAppDetail() {
+  stopStageTrailer();
   clearInterval(stageBackdropTimer);
   stageBackdropTimer=null;
   const current=history.state;
@@ -439,6 +449,9 @@ function closeAppDetail() {
 }
 
 function openPerson(id) {
+  stopStageTrailer();
+  clearInterval(stageBackdropTimer);
+  stageBackdropTimer=null;
   $("#stage")?.remove();
   const current=history.state&&typeof history.state==="object"?history.state:{};
   const state={
@@ -1105,7 +1118,11 @@ async function refreshStageCredits(movie) {
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
     currentPanel.innerHTML=renderCredits(details);
-    const updatedMovie={...movie,backdropPaths:details.backdropPaths||[]};
+    const updatedMovie={
+      ...movie,
+      backdropPaths:details.backdropPaths||[],
+      trailerKey:details.trailerKey||movie.trailerKey||""
+    };
     if (activeStageMovie&&String(activeStageMovie.tmdbId)===String(movie.tmdbId)) {
       activeStageMovie=updatedMovie;
       const sequenceIndex=activeStageSequence.findIndex(item=>String(item.tmdbId)===String(movie.tmdbId));
@@ -1121,6 +1138,7 @@ async function refreshStageCredits(movie) {
         },"",location.href);
       }
       rotateStageBackdrops(details.backdropPaths||[]);
+      if (updatedMovie.trailerKey) setupStageTrailer(updatedMovie.trailerKey);
     }
   } catch(error) {
     const currentPanel=$("#stageCredits");
@@ -1895,6 +1913,7 @@ async function choose(r,status="watched") {
 function stage(m,readOnly=false,options={}) {
   if (!m) return;
 
+  stopStageTrailer();
   clearInterval(stageBackdropTimer);
   stageBackdropTimer=null;
   $("#stage")?.remove();
@@ -1951,6 +1970,7 @@ function stage(m,readOnly=false,options={}) {
       <div class="stagebg" data-read-only="${readOnly}">
         <div class="stageBackdropLayer active" id="stageBackdropA" aria-hidden="true"></div>
         <div class="stageBackdropLayer" id="stageBackdropB" aria-hidden="true"></div>
+        <div class="stageTrailerLayer" id="stageTrailerLayer" aria-hidden="true"><div id="stageTrailerPlayer"></div></div>
         <div class="stageListControls" role="group" aria-label="Your movie lists">
           <button class="stageListButton ${listStatus==="watched"?"selected":""}" onclick="setStageListStatus('watched')" ${listStatus==="watched"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="watched"?"✓ Watched":listStatus?"Move to Watched":"＋ Add to Watched"}</button>
           <button class="stageListButton ${listStatus==="want"?"selected":""}" onclick="setStageListStatus('want')" ${listStatus==="want"?"disabled aria-pressed=\"true\"":"aria-pressed=\"false\""}>${listStatus==="want"?"✓ Want to watch":listStatus?"Move to Want to watch":"＋ Add to Want to watch"}</button>
@@ -2012,6 +2032,7 @@ function stage(m,readOnly=false,options={}) {
     }
   };
   rotateStageBackdrops(m.backdropPaths?.length?m.backdropPaths:[m.backdropPath||m.posterPath].filter(Boolean));
+  if (m.trailerKey) setupStageTrailer(m.trailerKey);
   refreshStageCredits(m);
   $("#stage .copyMovieTitle").onclick=event=>copyMovieTitle(event.currentTarget);
 
@@ -2088,6 +2109,99 @@ function rotateStageBackdrops(paths) {
     layers[next].classList.add("active");
     layers[current].classList.remove("active");
   },6500);
+}
+
+function loadYouTubePlayerApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (youtubePlayerApiPromise) return youtubePlayerApiPromise;
+  youtubePlayerApiPromise=new Promise((resolve,reject)=>{
+    const script=document.createElement("script");
+    script.src="https://www.youtube.com/iframe_api";
+    script.async=true;
+    script.onerror=()=>{
+      youtubePlayerApiPromise=null;
+      reject(new Error("Could not load YouTube's player API."));
+    };
+    const previousCallback=window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady=()=>{
+      if (typeof previousCallback==="function") previousCallback();
+      if (window.YT?.Player) resolve(window.YT);
+      else reject(new Error("YouTube's player API did not initialize."));
+    };
+    document.head.appendChild(script);
+  });
+  return youtubePlayerApiPromise;
+}
+
+function stopStageTrailer() {
+  stageTrailerGeneration++;
+  clearTimeout(stageTrailerIdleTimer);
+  stageTrailerIdleTimer=null;
+  if (stageTrailerPointerHandler) {
+    document.removeEventListener("pointermove",stageTrailerPointerHandler);
+    stageTrailerPointerHandler=null;
+  }
+  if (stageTrailerPlayer) {
+    stageTrailerPlayer.destroy();
+    stageTrailerPlayer=null;
+  }
+  $("#stage")?.classList.remove("trailerVisible");
+}
+
+function setupStageTrailer(videoId) {
+  const holder=$("#stageTrailerPlayer");
+  const stageElement=$("#stage");
+  if (!holder||!stageElement||!videoId) return;
+  stopStageTrailer();
+  const generation=stageTrailerGeneration;
+  let isIdle=false;
+  const startAfterIdle=()=>{
+    clearTimeout(stageTrailerIdleTimer);
+    stageTrailerIdleTimer=setTimeout(async()=>{
+      if (generation!==stageTrailerGeneration||!$("#stageTrailerPlayer")) return;
+      isIdle=true;
+      $("#stage")?.classList.add("trailerVisible");
+      try {
+        const YT=await loadYouTubePlayerApi();
+        if (generation!==stageTrailerGeneration||!$("#stageTrailerPlayer")) return;
+        if (!stageTrailerPlayer) {
+          stageTrailerPlayer=new YT.Player("stageTrailerPlayer",{
+            videoId,
+            playerVars:{autoplay:0,controls:0,disablekb:1,fs:0,iv_load_policy:3,modestbranding:1,playsinline:1,rel:0},
+            events:{
+              onReady:event=>{
+                event.target.mute();
+                if (isIdle&&generation===stageTrailerGeneration) event.target.playVideo();
+                else event.target.pauseVideo();
+              },
+              onStateChange:event=>{
+                if (event.data===YT.PlayerState.ENDED&&isIdle&&generation===stageTrailerGeneration) {
+                  event.target.seekTo(0,true);
+                  event.target.mute();
+                  event.target.playVideo();
+                }
+              }
+            }
+          });
+        } else {
+          stageTrailerPlayer.mute();
+          stageTrailerPlayer.playVideo();
+        }
+      } catch(error) {
+        $("#stage")?.classList.remove("trailerVisible");
+        console.error("Could not start the muted background trailer.",error);
+      }
+    },3500);
+  };
+  stageTrailerPointerHandler=()=>{
+    isIdle=false;
+    clearTimeout(stageTrailerIdleTimer);
+    $("#stage")?.classList.remove("trailerVisible");
+    if (stageTrailerPlayer) stageTrailerPlayer.pauseVideo();
+    startAfterIdle();
+  };
+  document.addEventListener("pointermove",stageTrailerPointerHandler,{passive:true});
+  startAfterIdle();
 }
 
 function navigateStageMovie(direction) {
