@@ -49,8 +49,8 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - Notification bell for new messages and library-sharing changes
 - Movie titles open a web search for that title
 - Movie details, cast, director, trailer and metadata
-- Production credits (directors, producers, writers, music and crew) with linked TMDB person biographies and filmographies
-- Ctrl+Z / Ctrl+Y navigation between visited CineVault views (text fields retain normal undo)
+- Production credits (directors, producers, writers, music and crew) with in-app TMDB biographies and filmographies
+- In-app person and movie detail navigation with browser Back/Forward and Ctrl+Z / Ctrl+Y history (text fields retain normal undo)
 - Personal movie notes
 - Search across title/cast/director/genre/year
 - Read-only sharing of watched and want-to-watch libraries

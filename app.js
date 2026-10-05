@@ -31,7 +31,7 @@ let chatRefreshTimer = null;
 let notificationRefreshTimer = null;
 
 function personPageUrl(person) {
-  return person?.id?`person.html?id=${encodeURIComponent(person.id)}`:"";
+  return person?.id?`#person=${encodeURIComponent(person.id)}`:"";
 }
 
 function tmdbHeaders() {
@@ -281,15 +281,16 @@ function shell() {
   $("#notificationBell").onclick=toggleNotifications;
   window.onpopstate=e=>{
     if (!e.state?.cineVaultRoute) return;
-    $("#stage")?.remove();
-    $("#profileImageViewer")?.remove();
-    document.querySelectorAll(".modal").forEach(modal=>modal.remove());
-    show(e.state.tab,e.state.routeParam||"");
+    restoreAppRoute(e.state);
   };
   document.onkeydown=e=>{
     if (e.key==="Escape") {
       e.preventDefault();
       $("#profileImageViewer")?.remove();
+      if (history.state?.detail) {
+        history.back();
+        return;
+      }
       $("#stage")?.remove();
       document.querySelectorAll(".modal").forEach(modal=>modal.remove());
       $("#notificationPanel")?.classList.remove("open");
@@ -335,17 +336,58 @@ function shell() {
   notificationRefreshTimer=setInterval(refreshNotifications,20000);
 }
 
-async function show(tab, q = "") {
-  const routeParam=tab==="sharedLibrary"?String(q||""):"";
-  if (!history.state?.cineVaultRoute) {
-    const state=history.state&&typeof history.state==="object"?history.state:{};
-    history.replaceState({...state,cineVaultRoute:true,tab,routeParam},"",location.href);
-  } else if (history.state.tab!==tab||history.state.routeParam!==routeParam) {
-    history.pushState({...history.state,cineVaultRoute:true,tab,routeParam},"",location.href);
+async function restoreAppRoute(route) {
+  $("#stage")?.remove();
+  $("#profileImageViewer")?.remove();
+  document.querySelectorAll(".modal").forEach(modal=>modal.remove());
+  await show(route.tab||"archive",route.routeParam||"",{history:false});
+  if (route.detail?.type==="movie"&&route.detail.movie) {
+    stage(route.detail.movie,Boolean(route.detail.readOnly),{history:false});
+  } else if (route.detail?.type==="person"&&route.detail.id) {
+    await renderPerson(route.detail.id);
   }
+}
+
+function closeAppDetail() {
+  if (history.state?.detail) {
+    history.back();
+    return;
+  }
+  $("#stage")?.remove();
+  show(history.state?.tab||activeTab||"archive",history.state?.routeParam||"");
+}
+
+function openPerson(id) {
+  $("#stage")?.remove();
+  const current=history.state&&typeof history.state==="object"?history.state:{};
+  const state={
+    ...current,
+    cineVaultRoute:true,
+    tab:current.tab||activeTab||"archive",
+    routeParam:current.routeParam||"",
+    detail:{type:"person",id:String(id)}
+  };
+  if (current.detail?.type==="person"&&String(current.detail.id)===String(id)) {
+    renderPerson(id);
+    return;
+  }
+  history.pushState(state,"",`#person=${encodeURIComponent(id)}`);
+  renderPerson(id);
+}
+
+async function show(tab, q = "", options = {}) {
+  const routeParam=tab==="sharedLibrary"?String(q||""):"";
+  if (options.history!==false&&!history.state?.cineVaultRoute) {
+    const state=history.state&&typeof history.state==="object"?history.state:{};
+    history.replaceState({...state,cineVaultRoute:true,tab,routeParam,detail:null},"",`${location.pathname}${location.search}`);
+  } else if (options.history!==false&&(history.state.tab!==tab||history.state.routeParam!==routeParam||history.state.detail)) {
+    history.pushState({...history.state,cineVaultRoute:true,tab,routeParam,detail:null},"",`${location.pathname}${location.search}`);
+  }
+  if (options.history!==false) $("#stage")?.remove();
   if (tab !== "sharedLibrary") stopSharedLibraryMonitor();
   if (tab !== "network") clearInterval(chatRefreshTimer);
   activeTab = tab;
+  document.title="CineVault";
   const c = $("#content");
   if (!c) return;
 
@@ -889,7 +931,7 @@ function renderCredits(movie) {
   const personCard=(person,kind)=>`
     <article class="${kind}Credit">
       ${personPageUrl(person)
-        ? `<a class="creditPortraitLink" href="${personPageUrl(person)}" target="_blank" rel="noopener" aria-label="Open ${esc(person.name)}'s biography in a new tab">`
+        ? `<a class="creditPortraitLink" href="${personPageUrl(person)}" data-person-id="${esc(person.id)}" aria-label="Open ${esc(person.name)}'s details">`
         : '<span class="creditPortraitLink">'}
         ${person.profilePath
           ? `<img src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
@@ -938,6 +980,101 @@ async function refreshStageCredits(movie) {
     const currentPanel=$("#stageCredits");
     if (!currentPanel||$("#stage")?.dataset.movieId!==String(movie.tmdbId)) return;
     currentPanel.insertAdjacentHTML("beforeend",`<p class="creditLoadMessage">${esc(error.message)}</p>`);
+  }
+}
+
+function personAge(birthday,deathday) {
+  if (!birthday) return "";
+  const born=new Date(`${birthday}T00:00:00Z`);
+  const died=deathday?new Date(`${deathday}T00:00:00Z`):new Date();
+  if (Number.isNaN(born.getTime())||Number.isNaN(died.getTime())) return "";
+  let age=died.getUTCFullYear()-born.getUTCFullYear();
+  if (died.getUTCMonth()<born.getUTCMonth()||
+    (died.getUTCMonth()===born.getUTCMonth()&&died.getUTCDate()<born.getUTCDate())) age--;
+  return age>=0?age:"";
+}
+
+function renderPersonCredit(credit,index) {
+  return `
+    <button type="button" class="personCreditCard" data-credit-index="${index}">
+      ${credit.posterPath
+        ? `<img src="${esc(img(credit.posterPath))}" alt="">`
+        : '<span class="personCreditPosterFallback">No poster</span>'}
+      <span class="personCreditCardBody">
+        <b>${esc(credit.title||"Untitled")}</b>
+        <small>${credit.mediaType==="tv"?"SERIES":"FILM"}${credit.year?` · ${esc(credit.year)}`:""}</small>
+        <span class="creditTags">${(credit.roles||[]).map(role=>`<span class="creditTag">${esc(role)}</span>`).join("")}</span>
+      </span>
+    </button>`;
+}
+
+async function renderPerson(id) {
+  const content=$("#content");
+  if (!content) return;
+  content.innerHTML='<p class="muted">Loading person details…</p>';
+  try {
+    const response=await fetch(`/api/person?id=${encodeURIComponent(id)}`,{headers:tmdbHeaders()});
+    const person=await readApiJson(response,"Person details API");
+    if (!response.ok) throw new Error(person.error||"Could not load this person's details.");
+    if (history.state?.detail?.type!=="person"||String(history.state.detail.id)!==String(id)) return;
+    const age=personAge(person.birthday,person.deathday);
+    const imdbUrl=person.imdbId
+      ? `https://www.imdb.com/name/${encodeURIComponent(person.imdbId)}/`
+      : `https://www.google.com/search?q=${encodeURIComponent(`${person.name} IMDb`)}`;
+    const credits=person.filmography||[];
+    document.title=`${person.name||"Person"} | CineVault`;
+    content.innerHTML=`
+      <section class="personPage">
+        <button type="button" class="personBack" id="personBack">← Back</button>
+        <section class="personHero">
+          ${person.profilePath
+            ? `<img class="personPortrait" src="${esc(creditImage(person.profilePath))}" alt="${esc(person.name)}">`
+            : `<div class="personPortrait personPortraitFallback">${esc((person.name||"?").slice(0,1).toUpperCase())}</div>`}
+          <div>
+            <p class="muted">${esc(person.knownForDepartment||"FILM & TELEVISION")}</p>
+            <h1 class="personTitle">${esc(person.name||"Unknown person")}</h1>
+            <div class="personMeta">
+              ${person.birthday?`<span>Born ${esc(person.birthday)}${age!==""?` · ${age} years old`:""}</span>`:""}
+              ${person.deathday?`<span>Died ${esc(person.deathday)}</span>`:""}
+              ${person.placeOfBirth?`<span>${esc(person.placeOfBirth)}</span>`:""}
+            </div>
+            <a class="personImdb" href="${imdbUrl}" target="_blank" rel="noopener">${person.imdbId?"Open IMDb profile ↗":"Search IMDb ↗"}</a>
+            ${person.biography?`<p class="personBio">${esc(person.biography)}</p>`:"<p class=\"personEmpty\">No biography is available from TMDB.</p>"}
+          </div>
+        </section>
+        <div class="personSectionHead">
+          <div><p class="muted">FILM & TELEVISION</p><h2>Credits</h2></div>
+          <small>${credits.length} TITLES</small>
+        </div>
+        ${credits.length
+          ? `<section class="personFilmography">${credits.map(renderPersonCredit).join("")}</section>`
+          : '<p class="personEmpty">No filmography is available from TMDB.</p>'}
+      </section>`;
+    $("#personBack").onclick=closeAppDetail;
+    document.querySelectorAll(".personCreditCard").forEach((button,index)=>{
+      button.onclick=()=>openPersonCredit(credits[index]);
+    });
+  } catch(error) {
+    if (history.state?.detail?.type!=="person"||String(history.state.detail.id)!==String(id)) return;
+    content.innerHTML=`
+      <section class="personPage">
+        <button type="button" class="personBack" onclick="closeAppDetail()">← Back</button>
+        <p class="personError">${esc(error.message)}</p>
+      </section>`;
+  }
+}
+
+async function openPersonCredit(credit) {
+  if (!credit?.id) return;
+  const type=credit.mediaType==="tv"?"series":"movie";
+  const params=new URLSearchParams({id:String(credit.id),type});
+  try {
+    const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
+    const movie=await readApiJson(response,"Movie details API");
+    if (!response.ok) throw new Error(movie.error||"Could not load this title.");
+    stage(movie);
+  } catch(error) {
+    alert(error.message);
   }
 }
 
@@ -1564,10 +1701,24 @@ async function choose(r,status="watched") {
   }
 }
 
-function stage(m,readOnly=false) {
+function stage(m,readOnly=false,options={}) {
   if (!m) return;
 
   $("#stage")?.remove();
+  document.title=`${m.title||"Movie"} | CineVault`;
+  if (options.history!==false) {
+    const current=history.state&&typeof history.state==="object"?history.state:{};
+    const detail={type:"movie",id:String(m.tmdbId),movie:m,readOnly};
+    if (current.detail?.type!=="movie"||String(current.detail.id)!==String(m.tmdbId)) {
+      history.pushState({
+        ...current,
+        cineVaultRoute:true,
+        tab:current.tab||activeTab||"archive",
+        routeParam:current.routeParam||"",
+        detail
+      },"",`#movie=${encodeURIComponent(m.tmdbId)}`);
+    }
+  }
 
   const movieSearchUrl=`https://www.google.com/search?q=${encodeURIComponent(m.title)}`;
   const trailerUrl=m.trailerKey
@@ -1576,8 +1727,8 @@ function stage(m,readOnly=false) {
 
   document.body.insertAdjacentHTML("beforeend",`
     <div class="stage" id="stage" data-movie-id="${esc(m.tmdbId)}">
-      <button class="x" onclick="$('#stage').remove()">×</button>
-      <div class="stagebg" onclick="event.stopPropagation()" style="background-image:linear-gradient(90deg,#08080c 20%,rgba(8,8,12,.8),rgba(8,8,12,.15)),url('${backdrop(m.backdropPath)}')">
+      <button class="x" onclick="closeAppDetail()">×</button>
+      <div class="stagebg" style="background-image:linear-gradient(90deg,#08080c 20%,rgba(8,8,12,.8),rgba(8,8,12,.15)),url('${backdrop(m.backdropPath)}')">
         <div class="stagebody">
           <img src="${img(m.posterPath)}" alt="${esc(m.title)}">
           <div>
@@ -1614,7 +1765,13 @@ function stage(m,readOnly=false) {
     </div>`);
 
   $("#stage").onclick=e=>{
-    if (e.target===e.currentTarget) $("#stage").remove();
+    const personLink=e.target instanceof Element?e.target.closest("[data-person-id]"):null;
+    if (personLink) {
+      e.preventDefault();
+      openPerson(personLink.dataset.personId);
+      return;
+    }
+    if (e.target===e.currentTarget) closeAppDetail();
   };
   refreshStageCredits(m);
 
