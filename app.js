@@ -275,6 +275,7 @@ function shell() {
           <button data-tab="shared">◎ Shared</button>
           <button data-tab="network">✉ Network</button>
           <button data-tab="characters">✦ Characters</button>
+          <button data-tab="contact">↗ Contact</button>
         </nav>
         <div class="side">
           <button id="add">＋ Add title</button>
@@ -554,6 +555,52 @@ async function show(tab, q = "", options = {}) {
   if (tab === "sharedLibrary") {
     c.innerHTML = '<p class="muted">Loading shared library…</p>';
     await renderSharedLibrary(q);
+    return;
+  }
+
+  if (tab==="contact") {
+    const subject="CineVault support request";
+    const body=[
+      "Hi Jeevan,",
+      "",
+      "I need help with CineVault.",
+      "",
+      `CineVault username: @${profile?.username||"add your username"}`,
+      "",
+      "What happened?",
+      "",
+      "Steps to reproduce:",
+      "",
+      "What I expected:",
+      "",
+      "Browser/device:",
+      "",
+      "Thank you,"
+    ].join("\n");
+    const mailto=`mailto:jeevanrushicreations584@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    c.innerHTML=`
+      <section class="contactPage">
+        <div class="contactPageGlow" aria-hidden="true"></div>
+        <span class="contactEyebrow"><i></i> CINEVAULT · DIRECT LINE</span>
+        <h1>A note to the<br><em>person behind</em><br>CineVault.</h1>
+        <p class="contactIntro">Found a problem or have an idea that could make your archive better? Send it directly to the developer. Every thoughtful note helps shape what CineVault becomes.</p>
+        <div class="contactDeveloper">
+          <span class="contactAvatar" aria-hidden="true">JR</span>
+          <div><small>BUILT AND LOOKED AFTER BY</small><strong>Jeevan Rushi</strong></div>
+          <span class="contactStatus"><i></i> DEVELOPER</span>
+        </div>
+        <div class="contactAction">
+          <a class="contactMailButton" href="${mailto}">
+            <span><small>FOR A PROBLEM OR SUGGESTION</small><b>Email Jeevan</b></span>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <div class="contactAddress">
+            <span>EMAIL</span>
+            <a href="${mailto}">jeevanrushicreations584@gmail.com</a>
+          </div>
+        </div>
+        <p class="contactPrivacy">Your email app opens a draft addressed to Jeevan with a support subject and a few helpful prompts already filled in. Send it from your usual email account, and please don’t include passwords or private API keys.</p>
+      </section>`;
     return;
   }
 
