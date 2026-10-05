@@ -995,9 +995,21 @@ function personAge(birthday,deathday) {
   return age>=0?age:"";
 }
 
+function personCreditCategory(role) {
+  const normalized=String(role||"").toLowerCase();
+  if (normalized.startsWith("actor ·")||normalized==="actor") return "Acted";
+  if (/^(co-)?director$/.test(normalized)) return "Directed";
+  if (normalized.includes("producer")) return "Produced";
+  if (/(writer|writing|screenplay|story)/.test(normalized)) return "Wrote";
+  if (/(music|composer|score)/.test(normalized)) return "Music";
+  if (normalized.includes("editor")) return "Edited";
+  return "Other crew";
+}
+
 function renderPersonCredit(credit,index) {
+  const categories=[...new Set((credit.roles||[]).map(personCreditCategory))];
   return `
-    <button type="button" class="personCreditCard" data-credit-index="${index}">
+    <button type="button" class="personCreditCard" data-credit-index="${index}" data-credit-categories="${esc(categories.join("|"))}">
       ${credit.posterPath
         ? `<img src="${esc(img(credit.posterPath))}" alt="">`
         : '<span class="personCreditPosterFallback">No poster</span>'}
@@ -1023,6 +1035,12 @@ async function renderPerson(id) {
       ? `https://www.imdb.com/name/${encodeURIComponent(person.imdbId)}/`
       : `https://www.google.com/search?q=${encodeURIComponent(`${person.name} IMDb`)}`;
     const credits=person.filmography||[];
+    const creditCategories=["Acted","Directed","Produced","Wrote","Music","Edited","Other crew"]
+      .map(category=>({
+        category,
+        count:credits.filter(credit=>(credit.roles||[]).some(role=>personCreditCategory(role)===category)).length
+      }))
+      .filter(item=>item.count);
     document.title=`${person.name||"Person"} | CineVault`;
     content.innerHTML=`
       <section class="personPage">
@@ -1048,10 +1066,27 @@ async function renderPerson(id) {
           <small>${credits.length} TITLES</small>
         </div>
         ${credits.length
-          ? `<section class="personFilmography">${credits.map(renderPersonCredit).join("")}</section>`
+          ? `<div class="personCreditFilters" role="group" aria-label="Filter credits">
+              <button type="button" class="personCreditFilter active" data-category="all" aria-pressed="true">All <small>${credits.length}</small></button>
+              ${creditCategories.map(({category,count})=>`<button type="button" class="personCreditFilter" data-category="${esc(category)}" aria-pressed="false">${esc(category)} <small>${count}</small></button>`).join("")}
+            </div>
+            <section class="personFilmography">${credits.map(renderPersonCredit).join("")}</section>`
           : '<p class="personEmpty">No filmography is available from TMDB.</p>'}
       </section>`;
     $("#personBack").onclick=closeAppDetail;
+    document.querySelectorAll(".personCreditFilter").forEach(filter=>{
+      filter.onclick=()=>{
+        const category=filter.dataset.category;
+        document.querySelectorAll(".personCreditFilter").forEach(button=>{
+          const selected=button===filter;
+          button.classList.toggle("active",selected);
+          button.setAttribute("aria-pressed",String(selected));
+        });
+        document.querySelectorAll(".personCreditCard").forEach(card=>{
+          card.hidden=category!=="all"&&!card.dataset.creditCategories.split("|").includes(category);
+        });
+      };
+    });
     document.querySelectorAll(".personCreditCard").forEach((button,index)=>{
       button.onclick=()=>openPersonCredit(credits[index]);
     });
