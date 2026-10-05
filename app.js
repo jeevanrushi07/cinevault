@@ -301,7 +301,7 @@ function shell() {
         <header>
           <div class="search searchExpanded">
             ⌕
-            <input id="search" autocomplete="off" placeholder="Search your archive or add a movie...">
+            <input id="search" autocomplete="off" placeholder="Search titles, directors, people, years, or genres...">
             <kbd>⌘ K</kbd>
             <div id="searchResults" class="headerResults"></div>
           </div>
@@ -2212,8 +2212,8 @@ async function addModal() {
         <button class="x" onclick="$('#modal').remove()">×</button>
         <span>ADD TO CINEVAULT</span>
         <h2>Find a movie or series.</h2>
-        <p>Results update while you type. Select the exact match.</p>
-        <div class="live">⌕<input id="aq" autofocus placeholder="Interstellar, Dark, Dune..."></div>
+        <p>Search by title, director, cast member, genre, or year. Select the exact match.</p>
+        <div class="live">⌕<input id="aq" autofocus placeholder="Dune, Denis Villeneuve, 2021, Science Fiction..."></div>
         <div id="results" class="searchResults">
           ${googleSearchEnabled?'<section class="googleSearchTray"><span>GOOGLE SEARCH</span><div id="addGoogleSearchResults"><p class="muted searchStatus">Search Google alongside TMDB to find the exact title.</p></div></section>':""}
           <section id="tmdbSearchResults"></section>
@@ -2465,12 +2465,21 @@ function titleResultMarkup(item,compact=false) {
   const title=item.title||item.name||"Untitled";
   const searchUrl=`https://www.google.com/search?q=${encodeURIComponent(title)}`;
   const saved=movies.find(movie=>String(movie.tmdbId)===String(item.id));
+  const matchLabel=item.search_match==="person"
+    ? `RELATED TO ${item.matched_person||"CAST OR CREW"}`
+    : item.search_match==="year"
+      ? `RELEASED IN ${item.release_date?.slice(0,4)||item.first_air_date?.slice(0,4)||"THIS YEAR"}`
+      : item.search_match==="keyword"
+        ? "RELATED KEYWORD"
+        : item.search_match==="genre"
+          ? "GENRE MATCH"
+          : "";
   return `
     <div class="result ${compact?"compactResult":""} ${saved?"savedResult":""}">
       <img src="${img(item.poster_path)}" alt="${esc(title)}">
       <div>
         <b><a class="movieSearchLink" href="${searchUrl}" target="_blank" rel="noopener">${esc(title)}</a></b>
-        <small>${(item.release_date||item.first_air_date||"").slice(0,4)} · ${item.media_type==="tv"?"Series":"Movie"}</small>
+        <small>${(item.release_date||item.first_air_date||"").slice(0,4)} · ${item.media_type==="tv"?"Series":"Movie"}${matchLabel?` · ${esc(matchLabel)}`:""}</small>
         ${compact ? "" : `<p>${esc(item.overview||"")}</p>`}
         ${saved
           ? `<div class="libraryStatus">${saved.status==="want"?"Already in Want to watch":"Already watched"}</div>`
