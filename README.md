@@ -26,6 +26,7 @@ Set these in Vercel Project Settings -> Environment Variables:
 - `SUPABASE_SERVICE_ROLE_KEY` — server only; NEVER put this in frontend code or GitHub.
 - `TMDB_API_KEY`
 - `YOUTUBE_API_KEY` — optional; enable YouTube Data API v3 for the Google Cloud project, then add the key here. It searches for embeddable trailers when TMDB trailers are unavailable or cannot be embedded.
+- `GOOGLE_CSE_API_KEY` and `GOOGLE_CSE_ID` — optional; enable the Custom Search JSON API in Google Cloud, create a Programmable Search Engine, then set its API key and Search Engine ID (`cx`) here to show web results alongside TMDB title search. Selecting **Find TMDB match** searches TMDB with the Google result title; choose the correct TMDB match to open its full CineVault title card.
 - `OMDB_API_KEY` — optional; enables IMDb ratings in movie and series details.
 
 After adding/changing environment variables, redeploy.
