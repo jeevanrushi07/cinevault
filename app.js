@@ -244,7 +244,6 @@ function shell() {
             <kbd>⌘ K</kbd>
             <div id="searchResults" class="headerResults"></div>
           </div>
-          <button id="addTop" aria-label="Add a movie">＋</button>
           <div class="notificationWrap">
             <button id="notificationBell" class="notificationBell" aria-label="Notifications">🔔<span id="notificationCount" class="notificationCount"></span></button>
             <div id="notificationPanel" class="notificationPanel"></div>
@@ -257,7 +256,7 @@ function shell() {
 
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => show(b.dataset.tab));
   $("#settings").onclick = settingsModal;
-  $("#add").onclick = $("#addTop").onclick = addModal;
+  $("#add").onclick = addModal;
   $("#share").onclick = shareLibraryModal;
   $("#profile").onclick = profileModal;
   $("#logout").onclick = $("#logoutTop").onclick = logout;
