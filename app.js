@@ -228,9 +228,9 @@ function shell() {
         <div class="side">
           <button id="add">＋ Add title</button>
           <button id="share">⇧ Share library</button>
-          <button id="profile" class="profileButton">
-            ${profile?.avatar?`<img src="${esc(img(profile.avatar))}" alt="">`:""}
-            <span>@${esc(profile?.username || "user")}</span>
+          <button id="profile" class="profileButton" aria-label="Profile: @${esc(profile?.username || "user")}" title="Profile: @${esc(profile?.username || "user")}">
+            ${profile?.avatar?`<img src="${esc(img(profile.avatar))}" alt="">`:`<span class="profileFallback" aria-hidden="true">${esc((profile?.username || "U").slice(0,1).toUpperCase())}</span>`}
+            <span class="profileUsername">@${esc(profile?.username || "user")}</span>
           </button>
           <button id="settings">⚙ Settings</button>
           <button id="logout">↪ Logout</button>
