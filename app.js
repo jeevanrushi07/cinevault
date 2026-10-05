@@ -63,6 +63,7 @@ const googleSearchStates={
   header:{query:"",request:0,loading:false,loaded:false,items:[],error:""},
   add:{query:"",request:0,loading:false,loaded:false,items:[],error:""}
 };
+const googleSearchEnabled=false;
 let trailerReadMode = localStorage.getItem("cinevault-read-mode")==="true";
 const copyFeedbackTimers = new WeakMap();
 
@@ -2214,7 +2215,7 @@ async function addModal() {
         <p>Results update while you type. Select the exact match.</p>
         <div class="live">⌕<input id="aq" autofocus placeholder="Interstellar, Dark, Dune..."></div>
         <div id="results" class="searchResults">
-          <section class="googleSearchTray"><span>GOOGLE SEARCH</span><div id="addGoogleSearchResults"><p class="muted searchStatus">Search Google alongside TMDB to find the exact title.</p></div></section>
+          ${googleSearchEnabled?'<section class="googleSearchTray"><span>GOOGLE SEARCH</span><div id="addGoogleSearchResults"><p class="muted searchStatus">Search Google alongside TMDB to find the exact title.</p></div></section>':""}
           <section id="tmdbSearchResults"></section>
         </div>
       </div>
@@ -2227,7 +2228,7 @@ async function addModal() {
     clearTimeout(timer);
       timer=setTimeout(()=>{
         searchTitles(input.value);
-        searchGoogleTitles(input.value,"add");
+      if (googleSearchEnabled) searchGoogleTitles(input.value,"add");
       },250);
   };
   $("#results").onscroll=()=>{
@@ -2489,7 +2490,7 @@ async function searchHeaderTitles(query) {
 
   if (query.trim().length<2) {
     headerSearchState={query:"",page:0,totalPages:1,loading:false,request:headerSearchState.request+1,items:[]};
-    searchGoogleTitles(query,"header");
+    if (googleSearchEnabled) searchGoogleTitles(query,"header");
     results.innerHTML="";
     results.classList.remove("open");
     return;
@@ -2498,8 +2499,8 @@ async function searchHeaderTitles(query) {
   const normalizedQuery=query.trim();
   const request=++headerSearchRequest;
   headerSearchState={query:normalizedQuery,page:0,totalPages:1,loading:false,request,items:[]};
-  searchGoogleTitles(normalizedQuery,"header");
-  results.innerHTML='<section class="googleSearchTray"><span>GOOGLE SEARCH</span><div id="headerGoogleSearchResults"><p class="muted searchStatus">Searching Google in parallel…</p></div></section><section class="searchTray" id="headerTmdbSearchResults"><p class="muted searchStatus">Searching TMDB…</p></section>';
+  if (googleSearchEnabled) searchGoogleTitles(normalizedQuery,"header");
+  results.innerHTML=`${googleSearchEnabled?'<section class="googleSearchTray"><span>GOOGLE SEARCH</span><div id="headerGoogleSearchResults"><p class="muted searchStatus">Searching Google in parallel…</p></div></section>':""}<section class="searchTray" id="headerTmdbSearchResults"><p class="muted searchStatus">Searching TMDB…</p></section>`;
   results.classList.add("open");
 
   try {
