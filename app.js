@@ -384,6 +384,9 @@ function renderAnimeArchive() {
   const animeMovies=movies.filter(isAnimeTitle);
   const watched=animeMovies.filter(movie=>movie.status==="watched");
   const want=animeMovies.filter(movie=>movie.status==="want");
+  const recentWatched=[...watched]
+    .sort((a,b)=>new Date(b.addedAt||0)-new Date(a.addedAt||0))
+    .slice(0,8);
   const genres=archiveGenreCatalog.length
     ? archiveGenreCatalog.map(genre=>genre.name)
     : fallbackGenreCatalog();
@@ -391,6 +394,19 @@ function renderAnimeArchive() {
     <div class="wall archiveWall animeArchiveWall">
       ${items.map((movie,index)=>poster(movie,index,false,false,"",movie.status)).join("")}
     </div>`:'<p class="archiveEmptyState">No animation titles are in this section yet. Add an animation title to your archive and it will appear here.</p>';
+  const titleRail=(items,railId,emptyMessage)=>`
+    <div class="animeTopRailWrap">
+      <div class="archiveQueueTrack animeTopRail" id="${railId}">
+        ${items.length?items.map(movie=>`
+          <article class="archiveQueueCard" data-id="${esc(movie.tmdbId)}" onclick="stageById('${esc(movie.tmdbId)}',this)">
+            <img src="${esc(img(movie.posterPath))}" alt="" loading="lazy">
+            <span><b>${esc(movie.title)}</b><small>${esc([movie.year,...(movie.genres||[]).slice(0,1)].filter(Boolean).join(" · "))}</small></span>
+            <i aria-hidden="true">↗</i>
+          </article>`).join("")
+        :`<p class="animeTopRailEmpty">${emptyMessage}</p>`}
+      </div>
+      ${items.length>1?`<div class="archiveRailControls"><button type="button" data-anime-scroll="${railId}" data-direction="-1" aria-label="Scroll left">‹</button><button type="button" data-anime-scroll="${railId}" data-direction="1" aria-label="Scroll right">›</button></div>`:""}
+    </div>`;
 
   return `
     <section class="animeArchiveHeader">
@@ -398,6 +414,14 @@ function renderAnimeArchive() {
       <h1>Anime archive.</h1>
       <p>Animation titles stay in your general archive too. This view gathers your watched and up-next anime in one place.</p>
       <div class="animeArchiveCounts"><span>${watched.length} WATCHED</span><span>${want.length} UP NEXT</span></div>
+    </section>
+    <section class="animeTopSection">
+      <div class="animeTopHead"><span>READY WHEN YOU ARE</span><h2>Anime up next</h2></div>
+      ${titleRail(want,"animeUpNextRail","No anime is up next yet. Add an animation title to your watchlist.")}
+    </section>
+    <section class="animeTopSection animeRecentlyWatched">
+      <div class="animeTopHead"><span>BACK IN YOUR COLLECTION</span><h2>Recently watched</h2></div>
+      ${titleRail(recentWatched,"animeRecentlyWatchedRail","Watched anime will appear here.")}
     </section>
     <section class="animeGenreSuggestions" aria-label="Anime genre suggestions">
       <div><span>EXPLORE ANIME BY GENRE</span><p>Choose genres to refresh animation suggestions.</p></div>
@@ -420,8 +444,7 @@ function renderAnimeArchive() {
         <p class="archiveRecommendationStatus">Finding anime suggestions…</p>
       </div>
     </section>
-    <section class="animeLibrarySection"><div class="head"><div><span>IN YOUR COLLECTION</span><h2>Watched anime</h2></div></div>${titleCards(watched)}</section>
-    <section class="animeLibrarySection"><div class="head"><div><span>READY WHEN YOU ARE</span><h2>Anime up next</h2></div></div>${titleCards(want)}</section>`;
+    <section class="animeLibrarySection"><div class="head"><div><span>IN YOUR COLLECTION</span><h2>All watched anime</h2></div></div>${titleCards(watched)}</section>`;
 }
 
 function bindAnimeArchive() {
@@ -447,6 +470,15 @@ function bindAnimeArchive() {
     button.addEventListener("click",()=>{
       $("#archiveRecommendationRail")?.scrollBy({
         left:Number(button.dataset.recommendationScroll)*Math.max(250,$("#archiveRecommendationRail").clientWidth*.8),
+        behavior:"smooth"
+      });
+    });
+  });
+  document.querySelectorAll("[data-anime-scroll]").forEach(button=>{
+    button.addEventListener("click",()=>{
+      const rail=document.getElementById(button.dataset.animeScroll);
+      rail?.scrollBy({
+        left:Number(button.dataset.direction)*Math.max(250,rail.clientWidth*.8),
         behavior:"smooth"
       });
     });
