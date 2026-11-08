@@ -23,6 +23,7 @@ let incomingShares = [];
 let outgoingShares = [];
 let activeTab = "archive";
 let activeStageSequence = [];
+let stageNavigationPending = false;
 let searchQuery = "";
 let sharedLibraryTimer = null;
 let activeSharedShareId = null;
@@ -1915,7 +1916,7 @@ async function renderPerson(id) {
       };
     });
     document.querySelectorAll(".personCreditCard").forEach((button,index)=>{
-      button.onclick=()=>openPersonCredit(credits[index]);
+      button.onclick=()=>openPersonCredit(credits[index],credits);
     });
   } catch(error) {
     if (history.state?.detail?.type!=="person"||String(history.state.detail.id)!==String(id)) return;
@@ -1927,7 +1928,20 @@ async function renderPerson(id) {
   }
 }
 
-async function openPersonCredit(credit) {
+function personCreditStageMovie(credit) {
+  return {
+    tmdbId:credit.id,
+    title:credit.title,
+    year:credit.year,
+    posterPath:credit.posterPath,
+    overview:"",
+    genres:[],
+    type:credit.mediaType==="tv"?"series":"movie",
+    personFilmographyCredit:true
+  };
+}
+
+async function openPersonCredit(credit,credits=[]) {
   if (!credit?.id) return;
   const type=credit.mediaType==="tv"?"series":"movie";
   const params=new URLSearchParams({id:String(credit.id),type});
@@ -1935,7 +1949,12 @@ async function openPersonCredit(credit) {
     const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
     const movie=await readApiJson(response,"Movie details API");
     if (!response.ok) throw new Error(movie.error||"Could not load this title.");
-    stage(movie);
+    const sequence=credits.filter(item=>item?.id).map(personCreditStageMovie);
+    const selectedIndex=sequence.findIndex(item=>
+      String(item.tmdbId)===String(movie.tmdbId)&&item.type===movie.type
+    );
+    if (selectedIndex>=0) sequence[selectedIndex]=movie;
+    stage(movie,false,{sequence});
   } catch(error) {
     alert(error.message);
   }
@@ -3616,14 +3635,39 @@ window.setStageTrailerAudio=enabled=>{
   }
 };
 
-function navigateStageMovie(direction) {
+async function navigateStageMovie(direction) {
+  if (stageNavigationPending) return;
   const currentIndex=activeStageSequence.findIndex(movie=>
     String(movie.tmdbId)===String(activeStageMovie?.tmdbId)
   );
+  if (currentIndex<0) return;
   const nextMovie=activeStageSequence[currentIndex+direction];
   if (!nextMovie) return;
   const readOnly=document.querySelector("#stage .stagebg")?.dataset.readOnly==="true";
-  stage(nextMovie,readOnly,{sequence:activeStageSequence,direction});
+  if (!nextMovie.personFilmographyCredit) {
+    stage(nextMovie,readOnly,{sequence:activeStageSequence,direction});
+    return;
+  }
+
+  const currentStageId=$("#stage")?.dataset.movieId;
+  if (!currentStageId) return;
+  stageNavigationPending=true;
+  try {
+    const params=new URLSearchParams({
+      id:String(nextMovie.tmdbId),
+      type:nextMovie.type==="series"?"series":"movie"
+    });
+    const response=await fetch(`/api/movie?${params}`,{headers:tmdbHeaders()});
+    const movie=await readApiJson(response,"Movie details API");
+    if (!response.ok) throw new Error(movie.error||"Could not load this title.");
+    if ($("#stage")?.dataset.movieId!==currentStageId) return;
+    activeStageSequence[currentIndex+direction]=movie;
+    stage(movie,readOnly,{sequence:activeStageSequence,direction});
+  } catch(error) {
+    if ($("#stage")?.dataset.movieId===currentStageId) alert(error.message);
+  } finally {
+    stageNavigationPending=false;
+  }
 }
 
 window.setTrailerReadMode=enabled=>{
