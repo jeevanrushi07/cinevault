@@ -48,8 +48,8 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - Separate movie libraries per user
 - Watched / want-to-watch states
 - Multi-genre discovery from the archive sidebar, with genre-based recommendations
-- A separate Anime archive for watched and up-next Japanese-language animation, with Japanese animation suggestions filtered by selected genres; anime remains in the general archive
-- A vertically scrollable sidebar so navigation and archive controls remain reachable on short screens
+- A separate Anime archive for watched and up-next animation titles, with suggestions filtered by selected genres; anime remains in the general archive
+- A scrollable, scrollbar-hidden sidebar navigation and genre area above the fixed Add title controls
 - Separate watched and watchlist filters for genre, language, title format, year, and minimum TMDB rating
 - Favorite actors, directors, musicians, and other creatives, with recommendations based on their filmographies
 - TMDB live search with separate bordered result boxes for titles and people in the same results panel; title results open full detail cards, and people results open person pages with filmographies

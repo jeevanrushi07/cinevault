@@ -375,10 +375,9 @@ function renderGenreExplorerPage() {
 }
 
 function isAnimeTitle(movie) {
-  const isAnimation=(movie.genres||[]).some(genre=>
+  return (movie.genres||[]).some(genre=>
     String(genre).toLocaleLowerCase()==="animation"
   );
-  return isAnimation&&String(movie.originalLanguage||"").toLocaleLowerCase()==="ja";
 }
 
 function renderAnimeArchive() {
@@ -391,17 +390,17 @@ function renderAnimeArchive() {
   const titleCards=items=>items.length?`
     <div class="wall archiveWall animeArchiveWall">
       ${items.map((movie,index)=>poster(movie,index,false,false,"",movie.status)).join("")}
-    </div>`:'<p class="archiveEmptyState">No anime titles here yet. Open a Japanese-language animation title to add it to this archive.</p>';
+    </div>`:'<p class="archiveEmptyState">No animation titles are in this section yet. Add an animation title to your archive and it will appear here.</p>';
 
   return `
     <section class="animeArchiveHeader">
-      <span>YOUR JAPANESE ANIMATION LIBRARY</span>
+      <span>YOUR ANIMATION LIBRARY</span>
       <h1>Anime archive.</h1>
-      <p>Anime stays in your general archive too. This view gathers your watched and up-next anime in one place.</p>
+      <p>Animation titles stay in your general archive too. This view gathers your watched and up-next anime in one place.</p>
       <div class="animeArchiveCounts"><span>${watched.length} WATCHED</span><span>${want.length} UP NEXT</span></div>
     </section>
     <section class="animeGenreSuggestions" aria-label="Anime genre suggestions">
-      <div><span>EXPLORE ANIME BY GENRE</span><p>Choose genres to refresh suggestions from Japanese animation.</p></div>
+      <div><span>EXPLORE ANIME BY GENRE</span><p>Choose genres to refresh animation suggestions.</p></div>
       <div class="animeGenreOptions">
         ${genres.filter(name=>name.toLocaleLowerCase()!=="animation").map(name=>`
           <label><input type="checkbox" value="${esc(name)}" ${selectedArchiveGenres.includes(name)?"checked":""}><span>${esc(name)}</span></label>
@@ -411,7 +410,7 @@ function renderAnimeArchive() {
     </section>
     <section class="archiveRecommendations animeRecommendations" id="archiveRecommendations" aria-labelledby="archiveRecommendationsTitle">
       <div class="archiveRecommendationsHead">
-        <div><span>JAPANESE ANIMATION DISCOVERY</span><h2 id="archiveRecommendationsTitle">${selectedArchiveGenres.length?`Anime: ${selectedArchiveGenres.map(esc).join(" + ")}`:"Anime for your next screening"}</h2><p>Suggestions stay focused on Japanese-language animation.</p></div>
+        <div><span>ANIMATION DISCOVERY</span><h2 id="archiveRecommendationsTitle">${selectedArchiveGenres.length?`Anime: ${selectedArchiveGenres.map(esc).join(" + ")}`:"Anime for your next screening"}</h2><p>Suggestions stay focused on animation and your selected genres.</p></div>
         <div class="archiveRailControls">
           <button type="button" data-recommendation-scroll="-1" aria-label="Scroll anime suggestions left">‹</button>
           <button type="button" data-recommendation-scroll="1" aria-label="Scroll anime suggestions right">›</button>
@@ -607,29 +606,31 @@ function shell() {
   document.body.innerHTML = `
     <div class="app">
       <aside>
-        <div class="brand">
-          <b>CINEVAULT</b>
-          <small>PERSONAL FILM ARCHIVE</small>
+        <div class="sidebarScrollArea">
+          <div class="brand">
+            <b>CINEVAULT</b>
+            <small>PERSONAL FILM ARCHIVE</small>
+          </div>
+          <nav>
+            <button data-tab="genres" class="sidebarGenresNav" title="Explore titles by genre" aria-label="Explore titles by genre">◈ Genres</button>
+            <button data-tab="archive" aria-keyshortcuts="Escape" title="Return to Archive (Esc)">
+              <span class="archiveNavIcon" aria-hidden="true">◉</span>
+              <span class="archiveNavLabel">Archive</span>
+              <kbd aria-hidden="true">ESC</kbd>
+            </button>
+            <button data-tab="anime" class="sidebarAnimeNav" title="Open your anime archive">▣ Anime</button>
+            <button data-tab="recent">◷ Recent</button>
+            <button data-tab="shared">◎ Shared</button>
+            <button data-tab="network">✉ Network</button>
+            <button data-tab="characters">✦ Characters</button>
+            <button data-tab="contact">↗ Contact</button>
+          </nav>
+          <section class="sidebarGenreExplorer" aria-label="Explore titles by genre">
+            <div class="sidebarGenreHeading"><b>EXPLORE GENRES</b><small id="sidebarGenreCount"></small><button type="button" id="sidebarGenreClear" hidden>Clear</button></div>
+            <div class="sidebarGenreOptions" id="sidebarGenreOptions"></div>
+            <p class="sidebarGenreStatus" id="sidebarGenreStatus" role="status"></p>
+          </section>
         </div>
-        <nav>
-          <button data-tab="genres" class="sidebarGenresNav" title="Explore titles by genre" aria-label="Explore titles by genre">◈ Genres</button>
-          <button data-tab="archive" aria-keyshortcuts="Escape" title="Return to Archive (Esc)">
-            <span class="archiveNavIcon" aria-hidden="true">◉</span>
-            <span class="archiveNavLabel">Archive</span>
-            <kbd aria-hidden="true">ESC</kbd>
-          </button>
-          <button data-tab="anime" class="sidebarAnimeNav" title="Open your anime archive">▣ Anime</button>
-          <button data-tab="recent">◷ Recent</button>
-          <button data-tab="shared">◎ Shared</button>
-          <button data-tab="network">✉ Network</button>
-          <button data-tab="characters">✦ Characters</button>
-          <button data-tab="contact">↗ Contact</button>
-        </nav>
-        <section class="sidebarGenreExplorer" aria-label="Explore titles by genre">
-          <div class="sidebarGenreHeading"><b>EXPLORE GENRES</b><small id="sidebarGenreCount"></small><button type="button" id="sidebarGenreClear" hidden>Clear</button></div>
-          <div class="sidebarGenreOptions" id="sidebarGenreOptions"></div>
-          <p class="sidebarGenreStatus" id="sidebarGenreStatus" role="status"></p>
-        </section>
         <div class="side">
           <button id="add">＋ Add title</button>
           <button id="share">⇧ Share library</button>
@@ -1208,7 +1209,7 @@ async function loadArchiveRecommendations(libraryMovies,{animeOnly=false}={}) {
   }
 
   rail.innerHTML=selectedArchiveGenres.length||animeOnly
-    ? `<p class="archiveRecommendationStatus">Finding ${animeOnly?"Japanese animation":"popular"} ${selectedArchiveGenres.map(esc).join(" and ")} titles…</p>`
+    ? `<p class="archiveRecommendationStatus">Finding ${animeOnly?"animation":"popular"} ${selectedArchiveGenres.map(esc).join(" and ")} titles…</p>`
     : '<p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>';
   let recommendations=[];
   let errors=[];

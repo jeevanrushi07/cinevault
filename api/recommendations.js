@@ -66,7 +66,6 @@ async function discoverByGenres(res,key,names,animeOnly=false) {
       with_genres:ids.join("|"),
       page:"1"
     });
-    if (animeOnly) params.set("with_original_language","ja");
     const data=await tmdbJson(`/discover/${endpoint}?${params}`,key);
     return (data.results||[]).map(item=>({
       id:item.id,
