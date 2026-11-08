@@ -394,7 +394,7 @@ function bindGenreExplorerPage() {
 async function loadArchiveCatalog() {
   const request=++archiveCatalogRequest;
   try {
-    const response=await fetch("/api/catalog",{headers:tmdbHeaders()});
+    const response=await fetch("/api/recommendations?catalog=true",{headers:tmdbHeaders()});
     const result=await readApiJson(response,"TMDB genre and language catalog API");
     if (!response.ok) throw new Error(result.error||"Could not load TMDB filters.");
     if (request!==archiveCatalogRequest) return;
@@ -1125,7 +1125,7 @@ async function loadArchiveRecommendations(libraryMovies) {
   if (selectedArchiveGenres.length) {
     try {
       const params=new URLSearchParams({genres:selectedArchiveGenres.join(",")});
-      const response=await fetch(`/api/discover?${params}`,{headers:tmdbHeaders()});
+      const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
       const result=await readApiJson(response,"TMDB genre discovery API");
       if (!response.ok) throw new Error(result.error||"TMDB genre discovery is unavailable.");
       recommendations=result.recommendations||[];
