@@ -38,7 +38,8 @@ async function genreCatalog(res,key) {
   });
 }
 
-async function discoverByGenres(res,key,names) {
+async function discoverByGenres(res,key,names,animeOnly=false) {
+  if (animeOnly&&!names.includes("animation")) names.push("animation");
   if (!names.length) return res.status(400).json({error:"Select at least one genre to explore."});
   const [movieCatalog,tvCatalog]=await Promise.all([
     tmdbJson("/genre/movie/list?language=en-US",key),
@@ -65,6 +66,7 @@ async function discoverByGenres(res,key,names) {
       with_genres:ids.join("|"),
       page:"1"
     });
+    if (animeOnly) params.set("with_original_language","ja");
     const data=await tmdbJson(`/discover/${endpoint}?${params}`,key);
     return (data.results||[]).map(item=>({
       id:item.id,
@@ -104,14 +106,14 @@ export default async function handler(req,res) {
       return res.status(502).json({error:error.message||"Could not load TMDB filters."});
     }
   }
-  if (req.query?.genres!==undefined) {
+  if (req.query?.genres!==undefined||req.query?.anime==="true") {
     const names=[...new Set(String(req.query.genres||"").split(",")
       .map(name=>name.trim().toLocaleLowerCase()).filter(Boolean))];
     try {
-      return await discoverByGenres(res,key,names);
+      return await discoverByGenres(res,key,names,req.query?.anime==="true");
     } catch(error) {
-      console.error("TMDB genre discovery lookup failed:",error);
-      return res.status(502).json({error:error.message||"Could not load titles for these genres."});
+      console.error("TMDB genre and anime discovery lookup failed:",error);
+      return res.status(502).json({error:error.message||"Could not load titles for these filters."});
     }
   }
 

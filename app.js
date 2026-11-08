@@ -328,7 +328,7 @@ function renderSidebarGenres() {
     clear.onclick=()=>{
       selectedArchiveGenres=[];
       renderSidebarGenres();
-      show("archive",searchQuery,{history:false});
+      show(activeTab==="anime"?"anime":"archive",searchQuery,{history:false});
     };
   }
   const status=$("#sidebarGenreStatus");
@@ -346,7 +346,7 @@ function renderSidebarGenres() {
       else selected.delete(input.value);
       selectedArchiveGenres=[...selected];
       renderSidebarGenres();
-      show("archive",searchQuery,{history:false});
+      show(activeTab==="anime"?"anime":"archive",searchQuery,{history:false});
       requestAnimationFrame(()=>$("#archiveRecommendations")?.scrollIntoView({behavior:"smooth",block:"start"}));
     });
   });
@@ -372,6 +372,86 @@ function renderGenreExplorerPage() {
         Explore ${selectedArchiveGenres.length||""} selected genre${selectedArchiveGenres.length===1?"":"s"}
       </button>
     </section>`;
+}
+
+function isAnimeTitle(movie) {
+  const isAnimation=(movie.genres||[]).some(genre=>
+    String(genre).toLocaleLowerCase()==="animation"
+  );
+  return isAnimation&&String(movie.originalLanguage||"").toLocaleLowerCase()==="ja";
+}
+
+function renderAnimeArchive() {
+  const animeMovies=movies.filter(isAnimeTitle);
+  const watched=animeMovies.filter(movie=>movie.status==="watched");
+  const want=animeMovies.filter(movie=>movie.status==="want");
+  const genres=archiveGenreCatalog.length
+    ? archiveGenreCatalog.map(genre=>genre.name)
+    : fallbackGenreCatalog();
+  const titleCards=items=>items.length?`
+    <div class="wall archiveWall animeArchiveWall">
+      ${items.map((movie,index)=>poster(movie,index,false,false,"",movie.status)).join("")}
+    </div>`:'<p class="archiveEmptyState">No anime titles here yet. Open a Japanese-language animation title to add it to this archive.</p>';
+
+  return `
+    <section class="animeArchiveHeader">
+      <span>YOUR JAPANESE ANIMATION LIBRARY</span>
+      <h1>Anime archive.</h1>
+      <p>Anime stays in your general archive too. This view gathers your watched and up-next anime in one place.</p>
+      <div class="animeArchiveCounts"><span>${watched.length} WATCHED</span><span>${want.length} UP NEXT</span></div>
+    </section>
+    <section class="animeGenreSuggestions" aria-label="Anime genre suggestions">
+      <div><span>EXPLORE ANIME BY GENRE</span><p>Choose genres to refresh suggestions from Japanese animation.</p></div>
+      <div class="animeGenreOptions">
+        ${genres.filter(name=>name.toLocaleLowerCase()!=="animation").map(name=>`
+          <label><input type="checkbox" value="${esc(name)}" ${selectedArchiveGenres.includes(name)?"checked":""}><span>${esc(name)}</span></label>
+        `).join("")}
+      </div>
+      ${selectedArchiveGenres.length?'<button type="button" class="animeGenreClear" id="animeGenreClear">Clear selected genres</button>':""}
+    </section>
+    <section class="archiveRecommendations animeRecommendations" id="archiveRecommendations" aria-labelledby="archiveRecommendationsTitle">
+      <div class="archiveRecommendationsHead">
+        <div><span>JAPANESE ANIMATION DISCOVERY</span><h2 id="archiveRecommendationsTitle">${selectedArchiveGenres.length?`Anime: ${selectedArchiveGenres.map(esc).join(" + ")}`:"Anime for your next screening"}</h2><p>Suggestions stay focused on Japanese-language animation.</p></div>
+        <div class="archiveRailControls">
+          <button type="button" data-recommendation-scroll="-1" aria-label="Scroll anime suggestions left">‹</button>
+          <button type="button" data-recommendation-scroll="1" aria-label="Scroll anime suggestions right">›</button>
+        </div>
+      </div>
+      <div class="archiveRecommendationRail" id="archiveRecommendationRail" aria-live="polite">
+        <p class="archiveRecommendationStatus">Finding anime suggestions…</p>
+      </div>
+    </section>
+    <section class="animeLibrarySection"><div class="head"><div><span>IN YOUR COLLECTION</span><h2>Watched anime</h2></div></div>${titleCards(watched)}</section>
+    <section class="animeLibrarySection"><div class="head"><div><span>READY WHEN YOU ARE</span><h2>Anime up next</h2></div></div>${titleCards(want)}</section>`;
+}
+
+function bindAnimeArchive() {
+  document.querySelectorAll(".animeGenreOptions input").forEach(input=>{
+    input.addEventListener("change",()=>{
+      const selected=new Set(selectedArchiveGenres);
+      if (input.checked) selected.add(input.value);
+      else selected.delete(input.value);
+      selectedArchiveGenres=[...selected];
+      show("anime","",{history:false});
+    });
+  });
+  $("#animeGenreClear")?.addEventListener("click",()=>{
+    selectedArchiveGenres=[];
+    show("anime","",{history:false});
+  });
+  document.querySelectorAll(".animeArchiveWall .poster").forEach(card=>{
+    card.addEventListener("click",()=>stageFromCard(
+      movies.find(movie=>String(movie.tmdbId)===card.dataset.id),card
+    ));
+  });
+  document.querySelectorAll("[data-recommendation-scroll]").forEach(button=>{
+    button.addEventListener("click",()=>{
+      $("#archiveRecommendationRail")?.scrollBy({
+        left:Number(button.dataset.recommendationScroll)*Math.max(250,$("#archiveRecommendationRail").clientWidth*.8),
+        behavior:"smooth"
+      });
+    });
+  });
 }
 
 function bindGenreExplorerPage() {
@@ -409,6 +489,8 @@ async function loadArchiveCatalog() {
   renderSidebarGenres();
   if ($("#content")&&activeTab==="archive"&&!history.state?.detail&&!$("#stage")) {
     show("archive",searchQuery,{history:false});
+  } else if ($("#content")&&activeTab==="anime") {
+    show("anime","",{history:false});
   } else if ($("#content")&&activeTab==="genres") {
     show("genres","",{history:false});
   }
@@ -536,6 +618,7 @@ function shell() {
             <span class="archiveNavLabel">Archive</span>
             <kbd aria-hidden="true">ESC</kbd>
           </button>
+          <button data-tab="anime" class="sidebarAnimeNav" title="Open your anime archive">▣ Anime</button>
           <button data-tab="recent">◷ Recent</button>
           <button data-tab="shared">◎ Shared</button>
           <button data-tab="network">✉ Network</button>
@@ -808,6 +891,13 @@ async function show(tab, q = "", options = {}) {
   if (tab==="genres") {
     c.innerHTML=renderGenreExplorerPage();
     bindGenreExplorerPage();
+    return;
+  }
+
+  if (tab==="anime") {
+    c.innerHTML=renderAnimeArchive();
+    bindAnimeArchive();
+    loadArchiveRecommendations(movies.filter(isAnimeTitle),{animeOnly:true});
     return;
   }
 
@@ -1104,11 +1194,11 @@ async function show(tab, q = "", options = {}) {
   focusArchiveSearch();
 }
 
-async function loadArchiveRecommendations(libraryMovies) {
+async function loadArchiveRecommendations(libraryMovies,{animeOnly=false}={}) {
   const rail=$("#archiveRecommendationRail");
   if (!rail) return;
   const request=++archiveRecommendationRequest;
-  if (!libraryMovies.length&&!selectedArchiveGenres.length) {
+  if (!animeOnly&&!libraryMovies.length&&!selectedArchiveGenres.length) {
     rail.innerHTML='<p class="archiveRecommendationStatus">Add a title to your collection or watchlist and CineVault will find recommendations based on your taste.</p>';
     return;
   }
@@ -1117,17 +1207,19 @@ async function loadArchiveRecommendations(libraryMovies) {
     return;
   }
 
-  rail.innerHTML=selectedArchiveGenres.length
-    ? `<p class="archiveRecommendationStatus">Finding popular ${selectedArchiveGenres.map(esc).join(" and ")} titles…</p>`
+  rail.innerHTML=selectedArchiveGenres.length||animeOnly
+    ? `<p class="archiveRecommendationStatus">Finding ${animeOnly?"Japanese animation":"popular"} ${selectedArchiveGenres.map(esc).join(" and ")} titles…</p>`
     : '<p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>';
   let recommendations=[];
   let errors=[];
-  if (selectedArchiveGenres.length) {
+  if (selectedArchiveGenres.length||animeOnly) {
     try {
-      const params=new URLSearchParams({genres:selectedArchiveGenres.join(",")});
+      const params=new URLSearchParams();
+      if (selectedArchiveGenres.length) params.set("genres",selectedArchiveGenres.join(","));
+      if (animeOnly) params.set("anime","true");
       const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
-      const result=await readApiJson(response,"TMDB genre discovery API");
-      if (!response.ok) throw new Error(result.error||"TMDB genre discovery is unavailable.");
+      const result=await readApiJson(response,animeOnly?"TMDB anime discovery API":"TMDB genre discovery API");
+      if (!response.ok) throw new Error(result.error||"TMDB discovery is unavailable.");
       recommendations=result.recommendations||[];
     } catch(error) {
       errors=[error.message||"TMDB genre discovery is unavailable."];
@@ -1166,6 +1258,8 @@ async function loadArchiveRecommendations(libraryMovies) {
       ? `<p class="archiveRecommendationStatus">Could not load recommendations: ${esc(errors.join(" "))}</p>`
       : selectedArchiveGenres.length
         ? '<p class="archiveRecommendationStatus">No new titles match those genres right now. Try a different genre combination.</p>'
+        : animeOnly
+          ? '<p class="archiveRecommendationStatus">No new anime suggestions right now. Try another genre combination later.</p>'
         : '<p class="archiveRecommendationStatus">No new recommendations right now. Add more films or series to your collection and watchlist, then check back.</p>';
     return;
   }
