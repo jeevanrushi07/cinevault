@@ -19,6 +19,8 @@ For a new database, also run `supabase/social_features.sql` in Supabase SQL Edit
 
 For an existing database, also run `supabase/favorite_people.sql` to enable favorite people and person-based recommendations. New databases get this table and its Row Level Security policies from `schema.sql`.
 
+For an existing database, run `supabase/movie_language_filter.sql` to enable language filters for watched titles and the watchlist. New databases get this column from `schema.sql`.
+
 ## Vercel environment variables
 
 Set these in Vercel Project Settings -> Environment Variables:
@@ -45,6 +47,8 @@ The public frontend consists of `index.html`, `app.js`, and `styles.css`. Server
 - Unique usernames
 - Separate movie libraries per user
 - Watched / want-to-watch states
+- Multi-genre discovery from the archive sidebar, with genre-based recommendations
+- Separate watched and watchlist filters for genre, language, title format, year, and minimum TMDB rating
 - Favorite actors, directors, musicians, and other creatives, with recommendations based on their filmographies
 - TMDB live search with separate bordered result boxes for titles and people in the same results panel; title results open full detail cards, and people results open person pages with filmographies
 - TMDB title search by director/cast/crew, genre, keyword, and release year (including title + year queries)

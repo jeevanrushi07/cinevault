@@ -154,6 +154,7 @@ export default async function handler(req,res) {
     imdbRating,
     imdbRatingError,
     tmdbRating:data.vote_average,
+    originalLanguage:data.original_language||"",
     runtimeMinutes:data.runtime||null,
     episodeRuntime:data.episode_run_time||[],
     seasonCount:data.number_of_seasons||null,

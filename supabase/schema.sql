@@ -28,6 +28,7 @@ create table if not exists public.movies (
   director text,
   imdb_id text,
   tmdb_rating numeric,
+  original_language text,
   trailer_key text,
   personal_note text,
   status text not null default 'watched' check (status in ('watched','want')),
@@ -35,6 +36,8 @@ create table if not exists public.movies (
   updated_at timestamptz not null default now(),
   unique(user_id, tmdb_id)
 );
+
+alter table public.movies add column if not exists original_language text;
 
 create table if not exists public.characters (
   id uuid primary key default gen_random_uuid(),

@@ -47,6 +47,7 @@ export default async function handler(req,res) {
         year:(item.release_date||item.first_air_date||"").slice(0,4),
         overview:item.overview||"",
         genreIds:Array.isArray(item.genre_ids)?item.genre_ids:[],
+        originalLanguage:item.original_language||"",
         tmdbRating:item.vote_average||null
       }));
 

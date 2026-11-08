@@ -24,6 +24,16 @@ let outgoingShares = [];
 let activeTab = "archive";
 let activeStageSequence = [];
 let stageNavigationPending = false;
+let selectedArchiveGenres = [];
+let archiveGenreCatalog = [];
+let archiveLanguages = [];
+let archiveCatalogError = "";
+let archiveCatalogRequest = 0;
+let archiveOpenFilter = "";
+const archiveFilters = {
+  watched:{genres:[],languages:[],types:[],year:"",minRating:""},
+  want:{genres:[],languages:[],types:[],year:"",minRating:""}
+};
 let searchQuery = "";
 let sharedLibraryTimer = null;
 let activeSharedShareId = null;
@@ -110,6 +120,7 @@ function movieRow(m) {
     director: m.director || "",
     imdb_id: m.imdbId || "",
     tmdb_rating: m.tmdbRating || null,
+    original_language: m.originalLanguage || null,
     trailer_key: m.trailerKey || "",
     personal_note: m.personalNote || "",
     status: m.status || "watched"
@@ -130,6 +141,7 @@ function normalizeMovie(r) {
     director: r.director || "",
     imdbId: r.imdb_id ?? r.imdbId ?? "",
     tmdbRating: r.tmdb_rating ?? r.tmdbRating,
+    originalLanguage: r.original_language ?? r.originalLanguage ?? "",
     trailerKey: r.trailer_key ?? r.trailerKey ?? "",
     personalNote: r.personal_note ?? r.personalNote ?? "",
     status: r.status || "watched",
@@ -289,6 +301,220 @@ async function deleteMovie(id) {
 }
 window.deleteMovie = deleteMovie;
 
+function fallbackGenreCatalog() {
+  return [...new Set(movies.flatMap(movie=>movie.genres||[])
+    .map(genre=>String(genre||"").trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b));
+}
+
+function renderSidebarGenres() {
+  const options=$("#sidebarGenreOptions");
+  if (!options) return;
+  const genres=archiveGenreCatalog.length
+    ? archiveGenreCatalog.map(genre=>genre.name)
+    : fallbackGenreCatalog();
+  options.innerHTML=genres.length
+    ? genres.map(name=>`
+      <label class="sidebarGenreOption">
+        <input type="checkbox" value="${esc(name)}" ${selectedArchiveGenres.includes(name)?"checked":""}>
+        <span>${esc(name)}</span>
+      </label>`).join("")
+    : '<small class="sidebarGenreEmpty">Add titles to see their genres here.</small>';
+  const count=$("#sidebarGenreCount");
+  if (count) count.textContent=selectedArchiveGenres.length?String(selectedArchiveGenres.length):"";
+  const clear=$("#sidebarGenreClear");
+  if (clear) {
+    clear.hidden=!selectedArchiveGenres.length;
+    clear.onclick=()=>{
+      selectedArchiveGenres=[];
+      renderSidebarGenres();
+      show("archive",searchQuery,{history:false});
+    };
+  }
+  const status=$("#sidebarGenreStatus");
+  if (status) {
+    status.textContent=archiveCatalogError
+      ? `Genre discovery unavailable: ${archiveCatalogError}`
+      : selectedArchiveGenres.length
+        ? `Exploring ${selectedArchiveGenres.join(" + ")}`
+        : "Choose one or more genres";
+  }
+  options.querySelectorAll("input").forEach(input=>{
+    input.addEventListener("change",()=>{
+      const selected=new Set(selectedArchiveGenres);
+      if (input.checked) selected.add(input.value);
+      else selected.delete(input.value);
+      selectedArchiveGenres=[...selected];
+      renderSidebarGenres();
+      show("archive",searchQuery,{history:false});
+      requestAnimationFrame(()=>$("#archiveRecommendations")?.scrollIntoView({behavior:"smooth",block:"start"}));
+    });
+  });
+}
+
+function renderGenreExplorerPage() {
+  const genres=archiveGenreCatalog.length
+    ? archiveGenreCatalog.map(genre=>genre.name)
+    : fallbackGenreCatalog();
+  return `
+    <section class="genreExplorerPage">
+      <span>DISCOVER BY GENRE</span>
+      <h1>Choose what you’re in the mood for.</h1>
+      <p>Select multiple genres to explore popular movies and series that match.</p>
+      ${archiveCatalogError?`<p class="genreExplorerError">Genre discovery unavailable: ${esc(archiveCatalogError)}</p>`:""}
+      <div class="genreExplorerOptions">
+        ${genres.map(name=>`
+          <label><input type="checkbox" value="${esc(name)}" ${selectedArchiveGenres.includes(name)?"checked":""}>
+            <span>${esc(name)}</span>
+          </label>`).join("")||'<p class="muted">Genre options will appear when your TMDB connection is available.</p>'}
+      </div>
+      <button type="button" class="primary" id="exploreSelectedGenres" ${selectedArchiveGenres.length?"":"disabled"}>
+        Explore ${selectedArchiveGenres.length||""} selected genre${selectedArchiveGenres.length===1?"":"s"}
+      </button>
+    </section>`;
+}
+
+function bindGenreExplorerPage() {
+  document.querySelectorAll(".genreExplorerOptions input").forEach(input=>{
+    input.addEventListener("change",()=>{
+      const selected=new Set(selectedArchiveGenres);
+      if (input.checked) selected.add(input.value);
+      else selected.delete(input.value);
+      selectedArchiveGenres=[...selected];
+      $("#content").innerHTML=renderGenreExplorerPage();
+      bindGenreExplorerPage();
+    });
+  });
+  $("#exploreSelectedGenres")?.addEventListener("click",()=>{
+    show("archive");
+    requestAnimationFrame(()=>$("#archiveRecommendations")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  });
+}
+
+async function loadArchiveCatalog() {
+  const request=++archiveCatalogRequest;
+  try {
+    const response=await fetch("/api/catalog",{headers:tmdbHeaders()});
+    const result=await readApiJson(response,"TMDB genre and language catalog API");
+    if (!response.ok) throw new Error(result.error||"Could not load TMDB filters.");
+    if (request!==archiveCatalogRequest) return;
+    archiveGenreCatalog=Array.isArray(result.genres)?result.genres:[];
+    archiveLanguages=Array.isArray(result.languages)?result.languages:[];
+    archiveCatalogError="";
+  } catch(error) {
+    if (request!==archiveCatalogRequest) return;
+    archiveCatalogError=error.message||"TMDB filters are unavailable.";
+    console.error("Could not load the TMDB genre catalog.",error);
+  }
+  renderSidebarGenres();
+  if ($("#content")&&activeTab==="archive"&&!history.state?.detail&&!$("#stage")) {
+    show("archive",searchQuery,{history:false});
+  } else if ($("#content")&&activeTab==="genres") {
+    show("genres","",{history:false});
+  }
+}
+
+function uniqueMovieValues(items,readValue) {
+  return [...new Set(items.map(readValue).filter(Boolean).map(String))]
+    .sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+}
+
+function renderArchiveLibraryFilter(status,items) {
+  const state=archiveFilters[status];
+  const genreOptions=uniqueMovieValues(items.flatMap(movie=>movie.genres||[]),value=>value);
+  const languageOptions=uniqueMovieValues(items,movie=>movie.originalLanguage)
+    .map(code=>({
+      code,
+      name:archiveLanguages.find(language=>language.code===code)?.name||code.toUpperCase()
+    }));
+  const years=uniqueMovieValues(items,movie=>/^\d{4}$/.test(String(movie.year||""))?movie.year:"")
+    .sort((a,b)=>Number(b)-Number(a));
+  const selectedCount=state.genres.length+state.languages.length+state.types.length+
+    Number(Boolean(state.year))+Number(Boolean(state.minRating));
+  const label=status==="want"?"Watchlist":"Watched collection";
+  const checkboxGroup=(field,options)=>options.length?`
+    <fieldset class="libraryFilterGroup">
+      <legend>${field==="genres"?"GENRE":field==="languages"?"LANGUAGE":"FORMAT"}</legend>
+      <div>${options.map(option=>{
+        const value=typeof option==="string"?option:option.value;
+        const name=typeof option==="string"?option:option.label;
+        return `<label><input class="libraryFilterControl" type="checkbox" data-status="${status}" data-field="${field}" value="${esc(value)}" ${state[field].includes(value)?"checked":""}><span>${esc(name)}</span></label>`;
+      }).join("")}</div>
+    </fieldset>`:"";
+
+  return `
+    <details class="libraryFilterDropdown" ${archiveOpenFilter===status?"open":""}>
+      <summary aria-label="Filter ${label}">FILTERS${selectedCount?` <i>${selectedCount}</i>`:""} <span aria-hidden="true">⌄</span></summary>
+      <div class="libraryFilterPanel">
+        ${checkboxGroup("genres",genreOptions)}
+        ${checkboxGroup("languages",languageOptions.map(language=>({value:language.code,label:language.name})))}
+        ${items.some(movie=>!movie.originalLanguage)?'<p class="libraryFilterHint">Language data is added as you open titles.</p>':""}
+        ${checkboxGroup("types",[
+          {value:"movie",label:"Movies"},
+          {value:"series",label:"Series"}
+        ])}
+        <label class="libraryFilterSelect">RELEASE YEAR
+          <select class="libraryFilterControl" data-status="${status}" data-field="year">
+            <option value="">All years</option>
+            ${years.map(year=>`<option value="${esc(year)}" ${state.year===year?"selected":""}>${esc(year)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="libraryFilterSelect">MINIMUM TMDB RATING
+          <select class="libraryFilterControl" data-status="${status}" data-field="minRating">
+            <option value="">Any rating</option>
+            ${["5","6","7","8"].map(rating=>`<option value="${rating}" ${state.minRating===rating?"selected":""}>${rating}+ / 10</option>`).join("")}
+          </select>
+        </label>
+        ${selectedCount?`<button type="button" class="libraryFilterClear" data-clear-filters="${status}">Clear filters</button>`:""}
+      </div>
+    </details>`;
+}
+
+function matchesArchiveFilters(movie,status) {
+  const state=archiveFilters[status];
+  if (state.genres.length&&!state.genres.some(genre=>
+    (movie.genres||[]).some(item=>String(item).toLocaleLowerCase()===genre.toLocaleLowerCase())
+  )) return false;
+  if (state.languages.length&&!state.languages.includes(movie.originalLanguage||"")) return false;
+  if (state.types.length&&!state.types.includes(movie.type==="series"?"series":"movie")) return false;
+  if (state.year&&String(movie.year)!==state.year) return false;
+  if (state.minRating&&!(Number(movie.tmdbRating)>=Number(state.minRating))) return false;
+  return true;
+}
+
+function bindArchiveLibraryFilters() {
+  document.querySelectorAll(".libraryFilterControl").forEach(control=>{
+    control.addEventListener("change",()=>{
+      const {status,field}=control.dataset;
+      if (!archiveFilters[status]||!["genres","languages","types","year","minRating"].includes(field)) return;
+      archiveOpenFilter=status;
+      if (control.type==="checkbox") {
+        const selected=new Set(archiveFilters[status][field]);
+        if (control.checked) selected.add(control.value);
+        else selected.delete(control.value);
+        archiveFilters[status][field]=[...selected];
+      } else {
+        archiveFilters[status][field]=control.value;
+      }
+      show("archive",searchQuery,{history:false});
+    });
+  });
+  document.querySelectorAll("[data-clear-filters]").forEach(button=>{
+    button.addEventListener("click",()=>{
+      const status=button.dataset.clearFilters;
+      archiveFilters[status]={genres:[],languages:[],types:[],year:"",minRating:""};
+      archiveOpenFilter=status;
+      show("archive",searchQuery,{history:false});
+    });
+  });
+  document.querySelectorAll(".libraryFilterDropdown").forEach(details=>{
+    details.addEventListener("toggle",()=>{
+      if (details.open) archiveOpenFilter=details.querySelector("[data-status]")?.dataset.status||"";
+      else if (archiveOpenFilter===details.querySelector("[data-status]")?.dataset.status) archiveOpenFilter="";
+    });
+  });
+}
+
 function shell() {
   clearInterval(chatRefreshTimer);
   archiveSearchCompressed=false;
@@ -304,6 +530,7 @@ function shell() {
           <small>PERSONAL FILM ARCHIVE</small>
         </div>
         <nav>
+          <button data-tab="genres" class="sidebarGenresNav" title="Explore titles by genre" aria-label="Explore titles by genre">◈ Genres</button>
           <button data-tab="archive" aria-keyshortcuts="Escape" title="Return to Archive (Esc)">
             <span class="archiveNavIcon" aria-hidden="true">◉</span>
             <span class="archiveNavLabel">Archive</span>
@@ -315,6 +542,11 @@ function shell() {
           <button data-tab="characters">✦ Characters</button>
           <button data-tab="contact">↗ Contact</button>
         </nav>
+        <section class="sidebarGenreExplorer" aria-label="Explore titles by genre">
+          <div class="sidebarGenreHeading"><b>EXPLORE GENRES</b><small id="sidebarGenreCount"></small><button type="button" id="sidebarGenreClear" hidden>Clear</button></div>
+          <div class="sidebarGenreOptions" id="sidebarGenreOptions"></div>
+          <p class="sidebarGenreStatus" id="sidebarGenreStatus" role="status"></p>
+        </section>
         <div class="side">
           <button id="add">＋ Add title</button>
           <button id="share">⇧ Share library</button>
@@ -345,6 +577,7 @@ function shell() {
     </div>`;
 
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => show(b.dataset.tab));
+  loadArchiveCatalog();
   $("#settings").onclick = settingsModal;
   $("#add").onclick = addModal;
   $("#share").onclick = shareLibraryModal;
@@ -572,6 +805,12 @@ async function show(tab, q = "", options = {}) {
     return;
   }
 
+  if (tab==="genres") {
+    c.innerHTML=renderGenreExplorerPage();
+    bindGenreExplorerPage();
+    return;
+  }
+
   if (tab === "characters") {
     c.innerHTML = characterWall();
     $("#randomCharacter")?.addEventListener("click", randomCharacter);
@@ -647,10 +886,10 @@ async function show(tab, q = "", options = {}) {
   }
 
   const filtered = q ? movies.filter(m => matches(m,q)) : movies;
-  const watched = filtered.filter(m=>m.status==="watched");
-  const want = filtered.filter(m=>m.status==="want");
   const allWatched=movies.filter(m=>m.status==="watched");
   const allWant=movies.filter(m=>m.status==="want");
+  const watched=filtered.filter(m=>m.status==="watched"&&matchesArchiveFilters(m,"watched"));
+  const want=filtered.filter(m=>m.status==="want"&&matchesArchiveFilters(m,"want"));
   const allLibraryMovies=movies.filter(m=>["watched","want"].includes(m.status));
   const genreCounts=new Map();
   allWatched.forEach(movie=>{
@@ -681,11 +920,7 @@ async function show(tab, q = "", options = {}) {
     want:want.filter(movie=>!archiveDecadeFilter||
       (Number.isInteger(Number(movie.year))&&`${Math.floor(Number(movie.year)/10)*10}s`===archiveDecadeFilter))
   };
-  const collection=[];
-  for (let index=0;index<Math.max(collectionByStatus.watched.length,collectionByStatus.want.length);index++) {
-    if (collectionByStatus.watched[index]) collection.push(collectionByStatus.watched[index]);
-    if (collectionByStatus.want[index]) collection.push(collectionByStatus.want[index]);
-  }
+  const collection=collectionByStatus.watched;
 
   c.innerHTML = `
     <section class="archiveHero">
@@ -714,10 +949,10 @@ async function show(tab, q = "", options = {}) {
       <div><strong>${genreCounts.size}</strong><span>GENRES EXPLORED</span></div>
       <div class="archiveTastePulse"><span>YOUR TASTE</span><strong>${topGenres.length?topGenres.map(genre=>esc(genre.name)).join(" <i>·</i> "):"Still unfolding"}</strong></div>
     </section>
-    ${watchlist(want)}
-    <section class="archiveRecommendations" aria-labelledby="archiveRecommendationsTitle">
+    ${watchlist(want,allWant)}
+    <section class="archiveRecommendations" id="archiveRecommendations" aria-labelledby="archiveRecommendationsTitle">
       <div class="archiveRecommendationsHead">
-        <div><span>SELECTED FROM YOUR TASTE</span><h2 id="archiveRecommendationsTitle">For your next screening.</h2><p>Inspired by what you’ve watched and what’s waiting in your watchlist.</p></div>
+        <div><span>${selectedArchiveGenres.length?"GENRE DISCOVERY":"SELECTED FROM YOUR TASTE"}</span><h2 id="archiveRecommendationsTitle">${selectedArchiveGenres.length?`Explore ${selectedArchiveGenres.map(esc).join(" + ")}`:"For your next screening."}</h2><p>${selectedArchiveGenres.length?"Popular movies and series across your selected genres. Select more genres in the sidebar to broaden your picks.":"Inspired by what you’ve watched and what’s waiting in your watchlist."}</p></div>
         <div class="archiveRailControls">
           <button type="button" data-recommendation-scroll="-1" aria-label="Scroll recommendations left">‹</button>
           <button type="button" data-recommendation-scroll="1" aria-label="Scroll recommendations right">›</button>
@@ -774,18 +1009,21 @@ async function show(tab, q = "", options = {}) {
     </section>
     <div class="head archiveCollectionHead">
       <div>
-        <span>${q?"SEARCHING YOUR ARCHIVE":archiveDecadeFilter?`A CHAPTER FROM THE ${archiveDecadeFilter.toUpperCase()}`:"WATCHED & UP NEXT"}</span>
-        <h2>${q ? `Results for "${esc(q)}"` : archiveDecadeFilter?`The ${archiveDecadeFilter}`:"Your library"}</h2>
+        <span>${q?"SEARCHING YOUR ARCHIVE":archiveDecadeFilter?`A CHAPTER FROM THE ${archiveDecadeFilter.toUpperCase()}`:"WATCHED COLLECTION"}</span>
+        <h2>${q ? `Results for "${esc(q)}"` : archiveDecadeFilter?`The ${archiveDecadeFilter}`:"Your watched movies & series"}</h2>
       </div>
-      <small>${collection.length} ${collection.length===1?"TITLE":"TITLES"} · ${collectionByStatus.watched.length} WATCHED · ${collectionByStatus.want.length} UP NEXT</small>
+      <div class="archiveCollectionTools">
+        <small>${collection.length} ${collection.length===1?"TITLE":"TITLES"} · ${collectionByStatus.want.length} UP NEXT</small>
+        ${renderArchiveLibraryFilter("watched",allWatched)}
+      </div>
     </div>
     ${collection.length?`
       <div class="wall archiveWall">
         ${collection.map((m,i)=>poster(m,i,false,false,"",m.status)).join("")}
       </div>`:`
       <div class="archiveEmptyState">
-        <span>${q?"NO MATCHES IN THIS CHAPTER":archiveDecadeFilter?"NO TITLES FROM THIS ERA YET":"YOUR ARCHIVE BEGINS HERE"}</span>
-        <p>${q?"Try a different title, person, year, or genre.":archiveDecadeFilter?"Choose another decade or add a title from this era.":"Save a film or series you love, and it will find its place here."}</p>
+        <span>${q?"NO MATCHES IN THIS CHAPTER":archiveDecadeFilter?"NO TITLES FROM THIS ERA YET":allWatched.length?"NO WATCHED TITLES MATCH":"YOUR WATCHED COLLECTION IS EMPTY"}</span>
+        <p>${q?"Try a different title, person, year, or genre.":archiveDecadeFilter?"Choose another decade or add a title from this era.":allWatched.length?"Change or clear your filters to see more of your collection.":"Mark a film or series as watched to start your collection."}</p>
       </div>`}`;
 
   document.querySelectorAll(".poster,.archiveHeroOpen[data-id]").forEach(p => {
@@ -839,6 +1077,7 @@ async function show(tab, q = "", options = {}) {
     });
   });
   loadArchiveRecommendations([...allWatched,...allWant]);
+  bindArchiveLibraryFilters();
   if (favoritePeople.length) loadFavoritePeopleRecommendations();
   document.querySelectorAll(".archiveDecade").forEach(button=>{
     button.addEventListener("click",()=>{
@@ -869,7 +1108,7 @@ async function loadArchiveRecommendations(libraryMovies) {
   const rail=$("#archiveRecommendationRail");
   if (!rail) return;
   const request=++archiveRecommendationRequest;
-  if (!libraryMovies.length) {
+  if (!libraryMovies.length&&!selectedArchiveGenres.length) {
     rail.innerHTML='<p class="archiveRecommendationStatus">Add a title to your collection or watchlist and CineVault will find recommendations based on your taste.</p>';
     return;
   }
@@ -878,37 +1117,56 @@ async function loadArchiveRecommendations(libraryMovies) {
     return;
   }
 
-  rail.innerHTML='<p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>';
-  const types=[...new Set(libraryMovies.map(movie=>movie.type==="series"?"series":"movie"))];
-  const requests=types.map(async type=>{
-    const matchingType=libraryMovies.filter(movie=>(movie.type==="series"?"series":"movie")===type);
-    const watchedSeeds=matchingType.filter(movie=>movie.status==="watched").slice(0,3);
-    const watchlistSeeds=matchingType.filter(movie=>movie.status==="want").slice(0,2);
-    const seedIds=[...new Set([...watchedSeeds,...watchlistSeeds].map(movie=>String(movie.tmdbId)))];
-    if (!seedIds.length) return [];
-    const params=new URLSearchParams({ids:seedIds.join(","),type});
-    const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
-    const result=await readApiJson(response,"TMDB recommendations API");
-    if (!response.ok) throw new Error(result.error||"TMDB recommendations are unavailable.");
-    return result.recommendations||[];
-  });
-  const results=await Promise.allSettled(requests);
+  rail.innerHTML=selectedArchiveGenres.length
+    ? `<p class="archiveRecommendationStatus">Finding popular ${selectedArchiveGenres.map(esc).join(" and ")} titles…</p>`
+    : '<p class="archiveRecommendationStatus">Finding titles shaped by your collection and watchlist…</p>';
+  let recommendations=[];
+  let errors=[];
+  if (selectedArchiveGenres.length) {
+    try {
+      const params=new URLSearchParams({genres:selectedArchiveGenres.join(",")});
+      const response=await fetch(`/api/discover?${params}`,{headers:tmdbHeaders()});
+      const result=await readApiJson(response,"TMDB genre discovery API");
+      if (!response.ok) throw new Error(result.error||"TMDB genre discovery is unavailable.");
+      recommendations=result.recommendations||[];
+    } catch(error) {
+      errors=[error.message||"TMDB genre discovery is unavailable."];
+    }
+  } else {
+    const types=[...new Set(libraryMovies.map(movie=>movie.type==="series"?"series":"movie"))];
+    const requests=types.map(async type=>{
+      const matchingType=libraryMovies.filter(movie=>(movie.type==="series"?"series":"movie")===type);
+      const watchedSeeds=matchingType.filter(movie=>movie.status==="watched").slice(0,3);
+      const watchlistSeeds=matchingType.filter(movie=>movie.status==="want").slice(0,2);
+      const seedIds=[...new Set([...watchedSeeds,...watchlistSeeds].map(movie=>String(movie.tmdbId)))];
+      if (!seedIds.length) return [];
+      const params=new URLSearchParams({ids:seedIds.join(","),type});
+      const response=await fetch(`/api/recommendations?${params}`,{headers:tmdbHeaders()});
+      const result=await readApiJson(response,"TMDB recommendations API");
+      if (!response.ok) throw new Error(result.error||"TMDB recommendations are unavailable.");
+      return result.recommendations||[];
+    });
+    const results=await Promise.allSettled(requests);
+    recommendations=results.filter(result=>result.status==="fulfilled").flatMap(result=>result.value);
+    errors=results.filter(result=>result.status==="rejected").map(result=>
+      result.reason?.message||"TMDB recommendations could not be loaded."
+    );
+  }
   if (request!==archiveRecommendationRequest||!$("#archiveRecommendationRail")) return;
 
-  const recommendations=results
-    .filter(result=>result.status==="fulfilled")
-    .flatMap(result=>result.value)
+  recommendations=recommendations
     .filter(recommendation=>!movies.some(movie=>String(movie.tmdbId)===String(recommendation.id)))
     .filter((recommendation,index,list)=>list.findIndex(other=>
       String(other.id)===String(recommendation.id)&&other.type===recommendation.type
     )===index)
     .slice(0,18);
-  const errors=results.filter(result=>result.status==="rejected").map(result=>result.reason?.message||"TMDB recommendations could not be loaded.");
 
   if (!recommendations.length) {
     rail.innerHTML=errors.length
       ? `<p class="archiveRecommendationStatus">Could not load recommendations: ${esc(errors.join(" "))}</p>`
-      : '<p class="archiveRecommendationStatus">No new recommendations right now. Add more films or series to your collection and watchlist, then check back.</p>';
+      : selectedArchiveGenres.length
+        ? '<p class="archiveRecommendationStatus">No new titles match those genres right now. Try a different genre combination.</p>'
+        : '<p class="archiveRecommendationStatus">No new recommendations right now. Add more films or series to your collection and watchlist, then check back.</p>';
     return;
   }
 
@@ -1511,7 +1769,7 @@ function poster(m,i=0,mutual=false,readOnly=false,existingStatus="",archiveStatu
     </article>`;
 }
 
-function watchlist(ms=movies.filter(m => m.status === "want")) {
+function watchlist(ms=movies.filter(m => m.status === "want"),allWant=movies.filter(m=>m.status==="want")) {
 
   return `
     <section class="watch vertical-watch archiveQueue"
@@ -1519,7 +1777,10 @@ function watchlist(ms=movies.filter(m => m.status === "want")) {
       ondrop="dropWatch(event)">
       <div class="archiveQueueHead">
         <div><span>THE NEXT SCREENING</span><b>Your watchlist</b></div>
-        <small>${ms.length} ${ms.length===1?"FILM":"FILMS"} QUEUED</small>
+        <div class="archiveQueueTools">
+          <small>${ms.length} ${ms.length===1?"TITLE":"TITLES"} SHOWN</small>
+          ${renderArchiveLibraryFilter("want",allWant)}
+        </div>
       </div>
       <div class="archiveQueueCarousel">
       <div class="archiveQueueTrack" id="archiveWatchlistTrack">${
@@ -1530,7 +1791,7 @@ function watchlist(ms=movies.filter(m => m.status === "want")) {
             <span><b>${esc(m.title)}</b><small>${esc([m.year,...(m.genres||[]).slice(0,1)].filter(Boolean).join(" · "))}</small></span>
             <i aria-hidden="true">↗</i>
           </article>`).join("")
-        : `<div class="archiveQueueEmpty"><p>Your next favorite is still out there.</p><button type="button" onclick="addModal()">＋ FIND A FILM</button></div>`
+        : `<div class="archiveQueueEmpty"><p>${allWant.length?"No watchlist titles match these filters.":"Your next favorite is still out there."}</p>${allWant.length?"":'<button type="button" onclick="addModal()">＋ FIND A FILM</button>'}</div>`
       }</div>
       ${ms.length>1?`<div class="archiveRailControls"><button type="button" data-watchlist-scroll="-1" aria-label="Scroll watchlist left">‹</button><button type="button" data-watchlist-scroll="1" aria-label="Scroll watchlist right">›</button></div>`:""}
       </div>
@@ -1749,9 +2010,21 @@ async function refreshStageCredits(movie) {
     const updatedMovie={
       ...movie,
       backdropPaths:details.backdropPaths||[],
+      originalLanguage:details.originalLanguage||movie.originalLanguage||"",
       trailerKey:details.trailerKey||movie.trailerKey||"",
       trailerKeys:details.trailerKeys||movie.trailerKeys||[]
     };
+    const savedMovie=movies.find(item=>String(item.tmdbId)===String(movie.tmdbId));
+    if (savedMovie&&details.originalLanguage&&savedMovie.originalLanguage!==details.originalLanguage) {
+      try {
+        await updateMovie(savedMovie,{original_language:details.originalLanguage});
+      } catch(error) {
+        console.error("Could not save the title's language filter metadata.",error);
+        currentPanel.insertAdjacentHTML("beforeend",
+          `<p class="creditLoadMessage">Could not save language metadata: ${esc(error.message||"check your database setup.")}</p>`
+        );
+      }
+    }
     if (activeStageMovie&&String(activeStageMovie.tmdbId)===String(movie.tmdbId)) {
       activeStageMovie=updatedMovie;
       const sequenceIndex=activeStageSequence.findIndex(item=>String(item.tmdbId)===String(movie.tmdbId));
@@ -3767,12 +4040,14 @@ async function settingsModal() {
     else localStorage.removeItem("cinevault-tmdb-key");
 
     $("#settingsModal").remove();
+    loadArchiveCatalog();
     alert("TMDB setting saved.");
   };
 
   $("#clearKey").onclick=()=>{
     localStorage.removeItem("cinevault-tmdb-key");
     $("#settingsModal").remove();
+    loadArchiveCatalog();
     alert("Browser TMDB key cleared.");
   };
 }
