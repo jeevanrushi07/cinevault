@@ -26,13 +26,12 @@ let activeStageSequence = [];
 let stageNavigationPending = false;
 let selectedArchiveGenres = [];
 let archiveGenreCatalog = [];
-let archiveLanguages = [];
 let archiveCatalogError = "";
 let archiveCatalogRequest = 0;
 let archiveOpenFilter = "";
 const archiveFilters = {
-  watched:{genres:[],languages:[],types:[],year:"",minRating:""},
-  want:{genres:[],languages:[],types:[],year:"",minRating:""}
+  watched:{genres:[],types:[],year:"",minRating:""},
+  want:{genres:[],types:[],year:"",minRating:""}
 };
 let searchQuery = "";
 let sharedLibraryTimer = null;
@@ -120,7 +119,6 @@ function movieRow(m) {
     director: m.director || "",
     imdb_id: m.imdbId || "",
     tmdb_rating: m.tmdbRating || null,
-    original_language: m.originalLanguage || null,
     trailer_key: m.trailerKey || "",
     personal_note: m.personalNote || "",
     status: m.status || "watched"
@@ -141,7 +139,6 @@ function normalizeMovie(r) {
     director: r.director || "",
     imdbId: r.imdb_id ?? r.imdbId ?? "",
     tmdbRating: r.tmdb_rating ?? r.tmdbRating,
-    originalLanguage: r.original_language ?? r.originalLanguage ?? "",
     trailerKey: r.trailer_key ?? r.trailerKey ?? "",
     personalNote: r.personal_note ?? r.personalNote ?? "",
     status: r.status || "watched",
@@ -510,7 +507,6 @@ async function loadArchiveCatalog() {
     if (!response.ok) throw new Error(result.error||"Could not load TMDB filters.");
     if (request!==archiveCatalogRequest) return;
     archiveGenreCatalog=Array.isArray(result.genres)?result.genres:[];
-    archiveLanguages=Array.isArray(result.languages)?result.languages:[];
     archiveCatalogError="";
   } catch(error) {
     if (request!==archiveCatalogRequest) return;
@@ -535,19 +531,14 @@ function uniqueMovieValues(items,readValue) {
 function renderArchiveLibraryFilter(status,items) {
   const state=archiveFilters[status];
   const genreOptions=uniqueMovieValues(items.flatMap(movie=>movie.genres||[]),value=>value);
-  const languageOptions=uniqueMovieValues(items,movie=>movie.originalLanguage)
-    .map(code=>({
-      code,
-      name:archiveLanguages.find(language=>language.code===code)?.name||code.toUpperCase()
-    }));
   const years=uniqueMovieValues(items,movie=>/^\d{4}$/.test(String(movie.year||""))?movie.year:"")
     .sort((a,b)=>Number(b)-Number(a));
-  const selectedCount=state.genres.length+state.languages.length+state.types.length+
+  const selectedCount=state.genres.length+state.types.length+
     Number(Boolean(state.year))+Number(Boolean(state.minRating));
   const label=status==="want"?"Watchlist":"Watched collection";
   const checkboxGroup=(field,options)=>options.length?`
     <fieldset class="libraryFilterGroup">
-      <legend>${field==="genres"?"GENRE":field==="languages"?"LANGUAGE":"FORMAT"}</legend>
+      <legend>${field==="genres"?"GENRE":"FORMAT"}</legend>
       <div>${options.map(option=>{
         const value=typeof option==="string"?option:option.value;
         const name=typeof option==="string"?option:option.label;
@@ -560,8 +551,6 @@ function renderArchiveLibraryFilter(status,items) {
       <summary aria-label="Filter ${label}">FILTERS${selectedCount?` <i>${selectedCount}</i>`:""} <span aria-hidden="true">⌄</span></summary>
       <div class="libraryFilterPanel">
         ${checkboxGroup("genres",genreOptions)}
-        ${checkboxGroup("languages",languageOptions.map(language=>({value:language.code,label:language.name})))}
-        ${items.some(movie=>!movie.originalLanguage)?'<p class="libraryFilterHint">Language data is added as you open titles.</p>':""}
         ${checkboxGroup("types",[
           {value:"movie",label:"Movies"},
           {value:"series",label:"Series"}
@@ -588,7 +577,6 @@ function matchesArchiveFilters(movie,status) {
   if (state.genres.length&&!state.genres.some(genre=>
     (movie.genres||[]).some(item=>String(item).toLocaleLowerCase()===genre.toLocaleLowerCase())
   )) return false;
-  if (state.languages.length&&!state.languages.includes(movie.originalLanguage||"")) return false;
   if (state.types.length&&!state.types.includes(movie.type==="series"?"series":"movie")) return false;
   if (state.year&&String(movie.year)!==state.year) return false;
   if (state.minRating&&!(Number(movie.tmdbRating)>=Number(state.minRating))) return false;
@@ -599,7 +587,7 @@ function bindArchiveLibraryFilters() {
   document.querySelectorAll(".libraryFilterControl").forEach(control=>{
     control.addEventListener("change",()=>{
       const {status,field}=control.dataset;
-      if (!archiveFilters[status]||!["genres","languages","types","year","minRating"].includes(field)) return;
+      if (!archiveFilters[status]||!["genres","types","year","minRating"].includes(field)) return;
       archiveOpenFilter=status;
       if (control.type==="checkbox") {
         const selected=new Set(archiveFilters[status][field]);
@@ -615,7 +603,7 @@ function bindArchiveLibraryFilters() {
   document.querySelectorAll("[data-clear-filters]").forEach(button=>{
     button.addEventListener("click",()=>{
       const status=button.dataset.clearFilters;
-      archiveFilters[status]={genres:[],languages:[],types:[],year:"",minRating:""};
+      archiveFilters[status]={genres:[],types:[],year:"",minRating:""};
       archiveOpenFilter=status;
       show("archive",searchQuery,{history:false});
     });
@@ -2137,21 +2125,9 @@ async function refreshStageCredits(movie) {
     const updatedMovie={
       ...movie,
       backdropPaths:details.backdropPaths||[],
-      originalLanguage:details.originalLanguage||movie.originalLanguage||"",
       trailerKey:details.trailerKey||movie.trailerKey||"",
       trailerKeys:details.trailerKeys||movie.trailerKeys||[]
     };
-    const savedMovie=movies.find(item=>String(item.tmdbId)===String(movie.tmdbId));
-    if (savedMovie&&details.originalLanguage&&savedMovie.originalLanguage!==details.originalLanguage) {
-      try {
-        await updateMovie(savedMovie,{original_language:details.originalLanguage});
-      } catch(error) {
-        console.error("Could not save the title's language filter metadata.",error);
-        currentPanel.insertAdjacentHTML("beforeend",
-          `<p class="creditLoadMessage">Could not save language metadata: ${esc(error.message||"check your database setup.")}</p>`
-        );
-      }
-    }
     if (activeStageMovie&&String(activeStageMovie.tmdbId)===String(movie.tmdbId)) {
       activeStageMovie=updatedMovie;
       const sequenceIndex=activeStageSequence.findIndex(item=>String(item.tmdbId)===String(movie.tmdbId));
